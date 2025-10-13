@@ -1,46 +1,16 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>FML1 INFO - 차량 정보 및 제어</title>
-    <style>
-        /* ... CSS 스타일은 동일합니다 ... */
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .btn {
-            display: inline-block;
-            padding: 10px 20px;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            text-decoration: none; /* 새 창을 열기 위해 A 태그 사용 필수 */
-            font-weight: bold;
-            margin-right: 10px;
-        }
-        .btn-update { background-color: #008CBA; }
-        .btn-check { background-color: #4CAF50; }
-        .btn-restart { background-color: #f44336; }
-        .btn-log { background-color: #555555; }
-
-        ul {
-            list-style-type: square;
-        }
-    </style>
+    <title>My Remote Desktop</title>
 </head>
 <body>
 
-    <h1>차량 시스템 제어 및 현황</h1>
-   
-    <p>
-        <a href="/update" class="btn btn-update" target="_blank">데이터 업데이트</a>
-       
-        <a href="/status" class="btn btn-check" target="_blank">상세 상태 확인</a>
-       
-        <a href="/restart" class="btn btn-restart" target="_blank">시스템 재시작</a>
-       
-        <a href="/logs" class="btn btn-log" target="_blank">최근 로그 보기</a>
-    </p>
+    <h1>VNC 원격 제어</h1>
 
-    <hr>
+    <iframe 
+        src="http://192.168.0.15:6080/vnc.html" 
+        style="width: 1024px; height: 768px; border: 1px solid black;">
+    </iframe>
 
-    </body>
+</body>
 </html>
