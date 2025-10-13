@@ -1,22 +1,49 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>My Remote Desktop</title>
+    <title>FML1 INFO - 차량 정보 및 제어</title>
     <style>
-        /* iframe 스타일을 원하시는 대로 조절하세요 */
-        iframe {
-            width: 1920px;
-            height: 1080px;
-            border: 1px solid #ccc;
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer;
+            text-decoration: none;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .btn-update { background-color: #008CBA; } 
+        .btn-check { background-color: #4CAF50; } 
+        .btn-restart { background-color: #f44336; } 
+        .btn-log { background-color: #555555; } 
+        /* 원격 조작 버튼을 위한 새 스타일 추가 */
+        .btn-remote { background-color: #9C27B0; } /* 보라색 계열 */
+
+        ul {
+            list-style-type: square;
         }
     </style>
 </head>
 <body>
 
-    <h1>나의 원격 데스크톱</h1>
-    <p>아래 화면을 통해 서버를 원격으로 조작할 수 있습니다.</p>
+    <h1>차량 시스템 제어 및 현황</h1>
+    
+    <p>
+        <a href="/update" class="btn btn-update" target="_blank">데이터 업데이트</a>
+        
+        <a href="/status" class="btn btn-check" target="_blank">상세 상태 확인</a>
+        
+        <a href="/restart" class="btn btn-restart" target="_blank">시스템 재시작</a>
+        
+        <a href="/logs" class="btn btn-log" target="_blank">최근 로그 보기</a>
+        
+        <a href="remote.html" class="btn btn-remote" target="_blank">원격 조작</a>
+    </p>
 
-    <iframe src="https://192.168.0.15:6080/vnc.html?path=websockify&password=123456"></iframe>
+    <hr>
 
 </body>
 </html>
