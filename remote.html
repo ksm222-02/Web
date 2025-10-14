@@ -1,22 +1,125 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>My Remote Desktop</title>
+    <meta charset="utf-8" />
+    <title>Autoware Remote Cockpit</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        /* iframe 스타일을 원하시는 대로 조절하세요 */
-        iframe {
-            width: 1920px;
-            height: 1080px;
+        /* 전체 페이지 스타일 */
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+            background-color: #f4f4f4;
+        }
+
+        /* 컨트롤 패널 스타일 */
+        .control-panel {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        h1 { color: #333; }
+        
+        #status { font-weight: bold; }
+
+        /* 버튼 스타일 */
+        button {
+            font-size: 1.2em;
+            padding: 15px 30px;
+            margin: 10px;
+            cursor: pointer;
+            border-radius: 8px;
             border: 1px solid #ccc;
+            color: white;
+            transition: background-color 0.3s;
+        }
+        button:hover { opacity: 0.9; }
+
+        #startButton { background-color: #4CAF50; /* Green */ }
+        #stopButton { background-color: #f44336; /* Red */ }
+        
+        /* iframe (원격 데스크톱) 스타일 */
+        iframe {
+            width: 95%; /* 화면 너비에 맞게 조절 */
+            max-width: 1920px; /* 최대 너비 설정 */
+            height: 80vh; /* 화면 높이의 80% */
+            border: 1px solid #ccc;
+            border-radius: 8px;
         }
     </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
 </head>
 <body>
 
-    <h1>나의 원격 데스크톱</h1>
-    <p>아래 화면을 통해 서버를 원격으로 조작할 수 있습니다.</p>
+    <div class="control-panel">
+        <h1>Autoware 원격 제어 🕹️</h1>
+        <p>연결 상태: <span id="status">연결 중...</span></p>
+        <div>
+            <button id="startButton" onclick="startAuto()">Auto 시작 (Engage)</button>
+            <button id="stopButton" onclick="stopAuto()">Auto 정지 (Disengage)</button>
+        </div>
+    </div>
 
-    <iframe src="https://192.168.0.15:6080/vnc.html?path=websockify&password=123456"></iframe>
+    <h1>원격 데스크톱</h1>
+    <iframe src="https://192.168.0.15:6080/vnc.html?path=websockify&password=123456">
+        <p>브라우저가 iframe을 지원하지 않습니다.</p>
+    </iframe>
+
+    <script type="text/javascript">
+        // 💡 Autoware가 실행 중인 PC의 IP 주소를 여기에 입력하세요.
+        const AUTOWARE_IP = 'localhost'; 
+        const WEBSOCKET_URL = `ws://${AUTOWARE_IP}:9090`;
+
+        const ros = new ROSLIB.Ros({
+            url : WEBSOCKET_URL
+        });
+
+        const statusElement = document.getElementById("status");
+
+        ros.on('connection', function() {
+            console.log('Connected to websocket server.');
+            statusElement.innerHTML = "✅ 연결 성공";
+            statusElement.style.color = "green";
+        });
+
+        ros.on('error', function(error) {
+            console.log('Error connecting to websocket server: ', error);
+            statusElement.innerHTML = "❌ 연결 실패";
+            statusElement.style.color = "red";
+        });
+
+        ros.on('close', function() {
+            console.log('Connection to websocket server closed.');
+            statusElement.innerHTML = "🔌 연결 끊김";
+            statusElement.style.color = "orange";
+        });
+
+        const engageTopic = new ROSLIB.Topic({
+            ros : ros,
+            name : '/autoware/engage',
+            messageType : 'autoware_auto_vehicle_msgs/msg/Engage'
+        });
+
+        function startAuto() {
+            const engageMsg = new ROSLIB.Message({ engage: true });
+            engageTopic.publish(engageMsg);
+            console.log('Published engage message: true');
+            alert('자율주행 모드 시작 명령을 전송했습니다.');
+        }
+
+        function stopAuto() {
+            const engageMsg = new ROSLIB.Message({ engage: false });
+            engageTopic.publish(engageMsg);
+            console.log('Published engage message: false');
+            alert('자율주행 모드 정지 명령을 전송했습니다.');
+        }
+    </script>
 
 </body>
 </html>
