@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Autoware Remote Control</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* 간단한 스타일 추가 */
+  body {
+    font-family: sans-serif;
+    text-align: center;
+    margin-top: 50px;
+  }
+  h1 {
+    color: #333;
+  }
+  #status {
+    font-weight: bold;
+  }
+  button {
+    font-size: 1.2em;
+    padding: 15px 30px;
+    margin: 10px;
+    cursor: pointer;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    background-color: #f0f0f0;
+    transition: background-color 0.3s;
+  }
+  button:hover {
+    background-color: #e0e0e0;
+  }
+  #startButton {
+    background-color: #4CAF50; /* Green */
+    color: white;
+  }
+  #startButton:hover {
+    background-color: #45a049;
+  }
+  #stopButton {
+    background-color: #f44336; /* Red */
+    color: white;
+  }
+  #stopButton:hover {
+    background-color: #da190b;
+  }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+
+</head>
+<body>
+
+  <h1>Autoware 원격 제어 🕹️</h1>
+  <p>연결 상태: <span id="status">연결 중...</span></p>
+
+  <div>
+    <button id="startButton" onclick="startAuto()">Auto 시작 (Engage)</button>
+    <button id="stopButton" onclick="stopAuto()">Auto 정지 (Disengage)</button>
+  </div>
+
+  <script type="text/javascript">
+    // 💡 Autoware가 실행 중인 PC의 IP 주소를 여기에 입력하세요.
+    // 만약 이 웹페이지를 여는 컴퓨터와 Autoware PC가 같다면 'localhost'를 사용해도 됩니다.
+    const AUTOWARE_IP = 'localhost'; 
+    const WEBSOCKET_URL = `ws://${AUTOWARE_IP}:9090`;
+
+    // ROS 2 웹 브릿지에 연결
+    const ros = new ROSLIB.Ros({
+      url : WEBSOCKET_URL
+    });
+
+    const statusElement = document.getElementById("status");
+
+    ros.on('connection', function() {
+      console.log('Connected to websocket server.');
+      statusElement.innerHTML = "✅ 연결 성공";
+      statusElement.style.color = "green";
+    });
+
+    ros.on('error', function(error) {
+      console.log('Error connecting to websocket server: ', error);
+      statusElement.innerHTML = "❌ 연결 실패";
+      statusElement.style.color = "red";
+    });
+
+    ros.on('close', function() {
+      console.log('Connection to websocket server closed.');
+      statusElement.innerHTML = "🔌 연결 끊김";
+      statusElement.style.color = "orange";
+    });
+
+    // 'Engage' 토픽 설정
+    const engageTopic = new ROSLIB.Topic({
+      ros : ros,
+      name : '/autoware/engage',
+      messageType : 'autoware_auto_vehicle_msgs/msg/Engage'
+    });
+
+    // 'Auto 시작 (Engage)' 버튼 클릭 시 호출
+    function startAuto() {
+      const engageMsg = new ROSLIB.Message({
+        engage: true
+      });
+      engageTopic.publish(engageMsg);
+      console.log('Published engage message: true');
+      alert('자율주행 모드 시작 명령을 전송했습니다.');
+    }
+
+    // 'Auto 정지 (Disengage)' 버튼 클릭 시 호출
+    function stopAuto() {
+      const engageMsg = new ROSLIB.Message({
+        engage: false
+      });
+      engageTopic.publish(engageMsg);
+      console.log('Published engage message: false');
+      alert('자율주행 모드 정지 명령을 전송했습니다.');
+    }
+  </script>
+
+</body>
+</html>
