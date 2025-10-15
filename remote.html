@@ -1,166 +1,166 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html>
 <head>
     <meta charset="utf-8" />
     <title>Autoware Remote Cockpit</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
+        /* 전체 페이지 스타일 */
         body {
-            font-family: 'Inter', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+            background-color: #f0f2f5;
+            color: #1c1e21;
         }
-        /* 추가적인 스타일링이 필요하면 여기에 작성합니다. */
+
+        /* 컨트롤 패널 스타일 */
+        .control-panel, .vnc-panel {
+            background-color: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            margin: 0 auto 25px auto;
+            max-width: 95%;
+            width: 1024px;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        p {
+            font-size: 1.1em;
+            color: #555;
+        }
+        
+        #status { font-weight: bold; }
+
+        /* 버튼 스타일 */
+        button {
+            font-size: 1.2em;
+            font-weight: 600;
+            padding: 15px 30px;
+            margin: 10px;
+            cursor: pointer;
+            border-radius: 8px;
+            border: none;
+            color: white;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+        button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+        }
+
+        #startButton { background: linear-gradient(135deg, #4CAF50, #2E7D32); }
+        #stopButton { background: linear-gradient(135deg, #f44336, #c62828); }
+        
+        /* iframe (원격 데스크톱) 스타일 */
+        iframe {
+            width: 100%;
+            height: 80vh; /* 화면 높이의 80% */
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-sizing: border-box; /* 패딩, 보더가 너비에 포함되도록 설정 */
+        }
     </style>
 </head>
-<body class="bg-gray-100 text-gray-800 flex flex-col items-center min-h-screen p-4">
+<body>
 
-    <!-- 주 컨테이너 -->
-    <div class="w-full max-w-7xl">
-
-        <!-- 헤더 -->
-        <header class="mb-6 text-center">
-            <h1 class="text-4xl font-bold text-gray-900">Autoware 원격 제어 🕹️</h1>
-            <p class="text-lg text-gray-600 mt-2">
-                연결 상태: <span id="status" class="font-bold text-yellow-600">연결 중...</span>
-            </p>
-        </header>
-
-        <!-- 보안 경고 메시지 -->
-        <div id="security-warning" class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md mb-6" role="alert">
-            <p class="font-bold">중요 보안 경고</p>
-            <p>이 페이지를 인터넷에 노출하는 것은 매우 위험할 수 있습니다. VPN 사용을 강력히 권장합니다. VNC 비밀번호를 즉시 변경하세요.</p>
-        </div>
-
-        <!-- 컨트롤 패널 -->
-        <div class="bg-white p-6 rounded-2xl shadow-lg mb-8">
-            <h2 class="text-2xl font-semibold mb-4 text-center">제어 패널</h2>
-            <div class="flex justify-center items-center gap-4 flex-wrap">
-                <button id="startButton" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-lg shadow-md transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:transform-none">
-                    Auto 시작 (Engage)
-                </button>
-                <button id="stopButton" class="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-lg shadow-md transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:transform-none">
-                    Auto 정지 (Disengage)
-                </button>
-            </div>
-        </div>
-
-        <!-- 상태 메시지 알림 -->
-        <div id="toast" class="fixed bottom-5 right-5 bg-blue-500 text-white py-2 px-4 rounded-lg shadow-xl opacity-0 transition-opacity duration-300">
-            알림 메시지
-        </div>
-
-        <!-- 원격 데스크톱 -->
-        <div class="bg-white p-2 rounded-2xl shadow-lg">
-             <h2 class="text-2xl font-semibold my-4 text-center">원격 데스크톱 (VNC)</h2>
-            <div class="aspect-w-16 aspect-h-9">
-                 <iframe id="vnc-iframe" class="w-full h-[80vh] border-2 border-gray-200 rounded-lg" title="Remote Desktop">
-                    <p>브라우저가 iframe을 지원하지 않습니다.</p>
-                </iframe>
-            </div>
+    <div class="control-panel">
+        <h1>Autoware 원격 제어 🕹️</h1>
+        <p>서버 연결 상태: <span id="status">연결 중...</span></p>
+        <div>
+            <button id="startButton" onclick="startAuto()">Auto 시작 (Engage)</button>
+            <button id="stopButton" onclick="stopAuto()">Auto 정지 (Disengage)</button>
         </div>
     </div>
 
+    <div class="vnc-panel">
+        <h1>원격 데스크톱 (VNC)</h1>
+        <!-- 중요: 이 VNC 주소는 외부에서 접속 가능하도록 별도 설정(예: VPN, VNC 게이트웨이)이 필요합니다. -->
+        <iframe src="https://192.168.0.15:6080/vnc.html?path=websockify&password=123456">
+            <p>브라우저가 iframe을 지원하지 않습니다.</p>
+        </iframe>
+    </div>
+
     <script type="text/javascript">
-        // 💡 [중요] Autoware PC의 '공인 IP 주소' 또는 'DDNS 호스트 이름'을 여기에 입력하세요.
-        // 💡 VPN을 사용하는 경우, Autoware PC의 '내부 IP 주소' (예: '192.168.0.15')를 입력하세요.
-        const AUTOWARE_ADDRESS = '192.168.0.15';
-
-        // --- 아래 코드는 특별한 경우가 아니면 수정할 필요가 없습니다. ---
-
-        const WEBSOCKET_URL = `ws://${AUTOWARE_ADDRESS}:9090`;
-        const VNC_URL = `https://${AUTOWARE_ADDRESS}:6080/vnc.html?path=websockify&password=123456`;
-        
-        // VNC iframe 소스 설정
-        document.getElementById('vnc-iframe').src = VNC_URL;
+        // 💡 1단계: 여기에 GCP 서버의 공인 IP 주소를 입력하세요.
+        const RELAY_SERVER_IP = 'YOUR_PUBLIC_SERVER_IP'; 
+        const WEBSOCKET_URL = `ws://${RELAY_SERVER_IP}:8080`;
 
         const statusElement = document.getElementById("status");
-        const startButton = document.getElementById("startButton");
-        const stopButton = document.getElementById("stopButton");
-        const toastElement = document.getElementById("toast");
-        
-        // 초기에는 버튼 비활성화
-        startButton.disabled = true;
-        stopButton.disabled = true;
+        let ws;
 
-        const ros = new ROSLIB.Ros({
-            url: WEBSOCKET_URL
-        });
+        function connect() {
+            ws = new WebSocket(WEBSOCKET_URL);
 
-        ros.on('connection', function() {
-            console.log('Connected to websocket server.');
-            statusElement.innerHTML = "✅ 연결 성공";
-            statusElement.className = "font-bold text-green-600";
-            startButton.disabled = false;
-            stopButton.disabled = false;
-            showToast('ROS 서버에 성공적으로 연결되었습니다.');
-        });
+            ws.onopen = function() {
+                console.log('Connected to relay server.');
+                statusElement.innerHTML = "✅ 연결 성공";
+                statusElement.style.color = "green";
+                // 클라이언트임을 서버에 알림
+                ws.send(JSON.stringify({ type: 'register', clientType: 'client' }));
+            };
 
-        ros.on('error', function(error) {
-            console.log('Error connecting to websocket server: ', error);
-            statusElement.innerHTML = "❌ 연결 실패";
-            statusElement.className = "font-bold text-red-600";
-            startButton.disabled = true;
-            stopButton.disabled = true;
-            showToast('ROS 서버 연결에 실패했습니다. 주소를 확인하세요.', 'error');
-        });
+            ws.onerror = function(error) {
+                console.log('Error connecting to relay server: ', error);
+                statusElement.innerHTML = "❌ 연결 실패";
+                statusElement.style.color = "red";
+            };
 
-        ros.on('close', function() {
-            console.log('Connection to websocket server closed.');
-            statusElement.innerHTML = "🔌 연결 끊김";
-            statusElement.className = "font-bold text-gray-500";
-            startButton.disabled = true;
-            stopButton.disabled = true;
-            showToast('ROS 서버와의 연결이 끊겼습니다.', 'warning');
-        });
-
-        const engageTopic = new ROSLIB.Topic({
-            ros: ros,
-            name: '/autoware/engage',
-            messageType: 'autoware_auto_vehicle_msgs/msg/Engage'
-        });
-
-        window.startAuto = function() {
-            const engageMsg = new ROSLIB.Message({ engage: true });
-            engageTopic.publish(engageMsg);
-            console.log('Published engage message: true');
-            showToast('자율주행 시작(Engage) 명령을 전송했습니다.');
+            ws.onclose = function() {
+                console.log('Connection to relay server closed. Reconnecting...');
+                statusElement.innerHTML = "🔌 연결 끊김 (재시도 중...)";
+                statusElement.style.color = "orange";
+                // 1초 후에 재연결 시도
+                setTimeout(connect, 1000); 
+            };
         }
 
-        window.stopAuto = function() {
-            const engageMsg = new ROSLIB.Message({ engage: false });
-            engageTopic.publish(engageMsg);
-            console.log('Published engage message: false');
-            showToast('자율주행 정지(Disengage) 명령을 전송했습니다.');
-        }
-
-        // 알림 메시지를 보여주는 함수
-        let toastTimeout;
-        function showToast(message, type = 'info') {
-            toastElement.textContent = message;
-            toastElement.classList.remove('bg-blue-500', 'bg-red-500', 'bg-yellow-500');
-
-            if (type === 'error') {
-                toastElement.classList.add('bg-red-500');
-            } else if (type === 'warning') {
-                toastElement.classList.add('bg-yellow-500');
+        function startAuto() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const command = {
+                    type: 'command',
+                    topic: '/autoware/engage',
+                    msg: { engage: true }
+                };
+                ws.send(JSON.stringify(command));
+                console.log('Sent engage command: true');
+                alert('자율주행 모드 시작 명령을 전송했습니다.');
             } else {
-                toastElement.classList.add('bg-blue-500');
+                alert('서버에 연결되지 않았습니다. 연결 상태를 확인해주세요.');
             }
-            
-            toastElement.classList.add('opacity-100');
-            
-            clearTimeout(toastTimeout);
-            toastTimeout = setTimeout(() => {
-                toastElement.classList.remove('opacity-100');
-            }, 3000);
         }
 
-        // 보안 경고: VNC URL에 기본 비밀번호가 포함되어 있으면 경고 표시
-        if (VNC_URL.includes('password=123456')) {
-            document.getElementById('security-warning').style.display = 'block';
+        function stopAuto() {
+             if (ws && ws.readyState === WebSocket.OPEN) {
+                const command = {
+                    type: 'command',
+                    topic: '/autoware/engage',
+                    msg: { engage: false }
+                };
+                ws.send(JSON.stringify(command));
+                console.log('Sent engage command: false');
+                alert('자율주행 모드 정지 명령을 전송했습니다.');
+            } else {
+                alert('서버에 연결되지 않았습니다. 연결 상태를 확인해주세요.');
+            }
         }
 
+        // 페이지 로드 시 바로 연결 시작
+        connect();
     </script>
+
 </body>
 </html>
+
