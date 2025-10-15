@@ -85,21 +85,19 @@
         </div>
     </div>
 
-    <div class="vnc-panel">
-        <h1>원격 데스크톱 (VNC)</h1>
-        <!-- 중요: 이 VNC 주소는 외부에서 접속 가능하도록 별도 설정(예: VPN, VNC 게이트웨이)이 필요합니다. -->
-        <iframe src="https://192.168.0.15:6080/vnc.html?path=websockify&password=123456">
-            <p>브라우저가 iframe을 지원하지 않습니다.</p>
-        </iframe>
-    </div>
+<div class="vnc-panel">
+    <h1>원격 데스크톱 (VNC)</h1>
+    <iframe src="/vnc/vnc.html?path=websockify&password=123456">
+        <p>브라우저가 iframe을 지원하지 않습니다.</p>
+    </iframe>
+</div>
 
-    <script type="text/javascript">
-        // 💡 1단계: 여기에 GCP 서버의 공인 IP 주소를 입력하세요.
-        const RELAY_SERVER_IP = '34.53.100.19'; 
-        const WEBSOCKET_URL = `ws://${RELAY_SERVER_IP}:8080`;
+<script type="text/javascript">
+    // 💡 wss 보안 프로토콜과 도메인, Nginx에 설정한 /ws/ 경로를 사용
+    const WEBSOCKET_URL = `wss://fml2.shop/ws/`;
 
-        const statusElement = document.getElementById("status");
-        let ws;
+    const statusElement = document.getElementById("status");
+    let ws;
 
         function connect() {
             ws = new WebSocket(WEBSOCKET_URL);
