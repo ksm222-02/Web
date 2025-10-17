@@ -11,9 +11,8 @@
 
     <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
     <script>
-        // GCP VM의 공개 IP 주소를 입력하세요.
-        const gcp_public_ip = 'YOUR_GCP_PUBLIC_IP';
-        const rosbridge_url = `ws://${gcp_public_ip}:9090`;
+        // ⬇️ 여기 IP 주소가 수정되었습니다!
+        const rosbridge_url = 'ws://34.64.221.18:9090';
 
         // ROS 연결 설정
         const ros = new ROSLIB.Ros({
@@ -24,15 +23,15 @@
         const statusDiv = document.getElementById('status');
         ros.on('connection', function() {
             console.log('Connected to websocket server.');
-            statusDiv.innerHTML = 'Connected';
+            statusDiv.innerHTML = '✅ Connected';
         });
         ros.on('error', function(error) {
             console.log('Error connecting to websocket server: ', error);
-            statusDiv.innerHTML = 'Error';
+            statusDiv.innerHTML = '❌ Error';
         });
         ros.on('close', function() {
             console.log('Connection to websocket server closed.');
-            statusDiv.innerHTML = 'Closed';
+            statusDiv.innerHTML = '🔌 Closed';
         });
 
         // Autoware engage 토픽 설정
@@ -46,7 +45,7 @@
         // 'AUTO' 버튼 클릭 이벤트
         document.getElementById('engageButton').onclick = function() {
             const engageMsg = new ROSLIB.Message({
-                stamp: { sec: 0, nanosec: 0 }, // 시간은 Autoware가 채우도록 0으로 설정 가능
+                stamp: { sec: 0, nanosec: 0 },
                 engage: true
             });
             engageTopic.publish(engageMsg);
