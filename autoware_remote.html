@@ -64,7 +64,7 @@
     const PUBLIC_SERVER_IP = '34.64.221.18'; // 예: '34.12.34.56'
     
     // 이제 웹소켓은 GCP 서버를 통해 연결됩니다.
-    const WEBSOCKET_URL = `ws://${PUBLIC_SERVER_IP}:9090`;
+    const WEBSOCKET_URL = `wws://${PUBLIC_SERVER_IP}:443`;
 
     // ROS 2 웹 브릿지에 연결
     const ros = new ROSLIB.Ros({
