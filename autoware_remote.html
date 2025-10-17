@@ -2,68 +2,87 @@
 <html>
 <head>
     <title>Autoware Remote Control</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 2rem; background-color: #f0f2f5; }
+        h1 { color: #333; }
+        #status { margin: 1rem; font-weight: bold; padding: 0.5rem 1rem; border-radius: 5px; }
+        .connected { color: #28a745; background-color: #e9f7eb; }
+        .disconnected { color: #dc3545; background-color: #fce8e6; }
+        .button-container { display: flex; gap: 1rem; }
+        button { font-size: 1.5rem; padding: 1rem 2rem; border-radius: 10px; border: none; cursor: pointer; color: white; }
+        #engageBtn { background-color: #007bff; }
+        #disengageBtn { background-color: #6c757d; }
+        button:hover { opacity: 0.8; }
+    </style>
+    <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
 </head>
 <body>
-    <h1>Autoware Remote Control</h1>
-    <button id="engageButton">AUTO</button>
-    <button id="disengageButton">STOP</button>
-    <div id="status">Connecting...</div>
+    <h1>Autoware Remote Controller</h1>
+    <div id="status" class="disconnected">Connecting...</div>
+    <div class="button-container">
+        <button id="engageBtn">AUTO</button>
+        <button id="disengageBtn">STOP</button>
+    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
     <script>
-        // ⬇️ 여기 IP 주소가 수정되었습니다!
-        const rosbridge_url = 'ws://34.64.221.18:9090';
+        // 1. Cloudflare Tunnel로 연결한 주소 입력 (wss:// 프로토콜 사용)
+        const rosbridge_url = 'wss://autoware.yourdomain.com'; // ‼️ 본인의 주소로 변경하세요!
 
-        // ROS 연결 설정
         const ros = new ROSLIB.Ros({
             url: rosbridge_url
         });
 
-        // 연결 상태 표시
+        // --- Connection Status Handling ---
         const statusDiv = document.getElementById('status');
         ros.on('connection', function() {
             console.log('Connected to websocket server.');
-            statusDiv.innerHTML = '✅ Connected';
+            statusDiv.textContent = 'Connected';
+            statusDiv.className = 'connected';
         });
+
         ros.on('error', function(error) {
             console.log('Error connecting to websocket server: ', error);
-            statusDiv.innerHTML = '❌ Error';
+            statusDiv.textContent = 'Connection Error';
+            statusDiv.className = 'disconnected';
         });
+
         ros.on('close', function() {
             console.log('Connection to websocket server closed.');
-            statusDiv.innerHTML = '🔌 Closed';
+            statusDiv.textContent = 'Disconnected';
+            statusDiv.className = 'disconnected';
         });
 
-        // Autoware engage 토픽 설정
-        // Autoware 버전에 따라 토픽 이름과 메시지 타입이 다를 수 있습니다.
+        // 2. Autoware Engage 토픽 설정
         const engageTopic = new ROSLIB.Topic({
             ros: ros,
-            name: '/api/autoware/set/engage', // Autoware API engage 토픽
-            messageType: 'tier4_autoware_api_msgs/msg/Engage'
+            name: '/api/autoware/engage',
+            messageType: 'autoware_adapi_v1_msgs/msg/Engage' // 정확한 메시지 타입 지정
         });
 
-        // 'AUTO' 버튼 클릭 이벤트
-        document.getElementById('engageButton').onclick = function() {
-            const engageMsg = new ROSLIB.Message({
-                stamp: { sec: 0, nanosec: 0 },
-                engage: true
-            });
-            engageTopic.publish(engageMsg);
-            console.log('Published engage: true');
-            alert('Sent AUTO command!');
-        };
+        // --- Button Click Event Listeners ---
+        const engageBtn = document.getElementById('engageBtn');
+        const disengageBtn = document.getElementById('disengageBtn');
 
-        // 'STOP' 버튼 클릭 이벤트
-        document.getElementById('disengageButton').onclick = function() {
-            const engageMsg = new ROSLIB.Message({
-                stamp: { sec: 0, nanosec: 0 },
-                engage: false
-            });
-            engageTopic.publish(engageMsg);
-            console.log('Published engage: false');
-            alert('Sent STOP command!');
-        };
+        engageBtn.addEventListener('click', () => {
+            sendCommand(true);
+        });
 
+        disengageBtn.addEventListener('click', () => {
+            sendCommand(false);
+        });
+
+        // 3. 토픽 발행 함수
+        function sendCommand(engageStatus) {
+            if (!ros.isConnected) {
+                alert("Not connected to Autoware!");
+                return;
+            }
+            const command = new ROSLIB.Message({
+                engage: engageStatus
+            });
+            engageTopic.publish(command);
+            console.log(`Sent command: ${engageStatus ? 'Engage (AUTO)' : 'Disengage (STOP)'}`);
+        }
     </script>
 </body>
 </html>
