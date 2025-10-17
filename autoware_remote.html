@@ -1,1 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Autoware Remote Control</title>
+</head>
+<body>
+    <h1>Autoware Remote Control</h1>
+    <button id="engageButton">AUTO</button>
+    <button id="disengageButton">STOP</button>
+    <div id="status">Connecting...</div>
 
+    <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
+    <script>
+        // GCP VM의 공개 IP 주소를 입력하세요.
+        const gcp_public_ip = 'YOUR_GCP_PUBLIC_IP';
+        const rosbridge_url = `ws://${gcp_public_ip}:9090`;
+
+        // ROS 연결 설정
+        const ros = new ROSLIB.Ros({
+            url: rosbridge_url
+        });
+
+        // 연결 상태 표시
+        const statusDiv = document.getElementById('status');
+        ros.on('connection', function() {
+            console.log('Connected to websocket server.');
+            statusDiv.innerHTML = 'Connected';
+        });
+        ros.on('error', function(error) {
+            console.log('Error connecting to websocket server: ', error);
+            statusDiv.innerHTML = 'Error';
+        });
+        ros.on('close', function() {
+            console.log('Connection to websocket server closed.');
+            statusDiv.innerHTML = 'Closed';
+        });
+
+        // Autoware engage 토픽 설정
+        // Autoware 버전에 따라 토픽 이름과 메시지 타입이 다를 수 있습니다.
+        const engageTopic = new ROSLIB.Topic({
+            ros: ros,
+            name: '/api/autoware/set/engage', // Autoware API engage 토픽
+            messageType: 'tier4_autoware_api_msgs/msg/Engage'
+        });
+
+        // 'AUTO' 버튼 클릭 이벤트
+        document.getElementById('engageButton').onclick = function() {
+            const engageMsg = new ROSLIB.Message({
+                stamp: { sec: 0, nanosec: 0 }, // 시간은 Autoware가 채우도록 0으로 설정 가능
+                engage: true
+            });
+            engageTopic.publish(engageMsg);
+            console.log('Published engage: true');
+            alert('Sent AUTO command!');
+        };
+
+        // 'STOP' 버튼 클릭 이벤트
+        document.getElementById('disengageButton').onclick = function() {
+            const engageMsg = new ROSLIB.Message({
+                stamp: { sec: 0, nanosec: 0 },
+                engage: false
+            });
+            engageTopic.publish(engageMsg);
+            console.log('Published engage: false');
+            alert('Sent STOP command!');
+        };
+
+    </script>
+</body>
+</html>
