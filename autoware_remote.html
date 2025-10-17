@@ -60,10 +60,11 @@
   </div>
 
   <script type="text/javascript">
-    // 💡 Autoware가 실행 중인 PC의 IP 주소를 여기에 입력하세요.
-    // 만약 이 웹페이지를 여는 컴퓨터와 Autoware PC가 같다면 'localhost'를 사용해도 됩니다.
-    const AUTOWARE_IP = 'localhost'; 
-    const WEBSOCKET_URL = `ws://${AUTOWARE_IP}:9090`;
+    // 💡 여기에 GCP 서버의 고정 IP 주소를 입력하세요.
+    const PUBLIC_SERVER_IP = '34.64.221.18'; // 예: '34.12.34.56'
+    
+    // 이제 웹소켓은 GCP 서버를 통해 연결됩니다.
+    const WEBSOCKET_URL = `ws://${PUBLIC_SERVER_IP}:9090`;
 
     // ROS 2 웹 브릿지에 연결
     const ros = new ROSLIB.Ros({
@@ -73,8 +74,8 @@
     const statusElement = document.getElementById("status");
 
     ros.on('connection', function() {
-      console.log('Connected to websocket server.');
-      statusElement.innerHTML = "✅ 연결 성공";
+      console.log('Connected to websocket server via GCP.');
+      statusElement.innerHTML = "✅ GCP 서버 연결 성공";
       statusElement.style.color = "green";
     });
 
