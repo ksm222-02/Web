@@ -1,164 +1,32 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <meta charset="utf-8" />
-    <title>Autoware Remote Cockpit</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <title>원격 조작 페이지</title>
     <style>
-        /* 전체 페이지 스타일 */
+        /* 페이지를 보기 좋게 꾸미기 위한 간단한 스타일 */
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-            margin: 0;
-            padding: 20px;
-            text-align: center;
-            background-color: #f0f2f5;
-            color: #1c1e21;
+            font-family: sans-serif;
+            text-align: center; /* 텍스트와 iframe을 중앙 정렬 */
+            margin-top: 20px;
         }
-
-        /* 컨트롤 패널 스타일 */
-        .control-panel, .vnc-panel {
-            background-color: white;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            margin: 0 auto 25px auto;
-            max-width: 95%;
-            width: 1024px;
-        }
-
-        h1 {
-            color: #333;
-            font-size: 2em;
-            margin-bottom: 10px;
-        }
-
-        p {
-            font-size: 1.1em;
-            color: #555;
-        }
-        
-        #status { font-weight: bold; }
-
-        /* 버튼 스타일 */
-        button {
-            font-size: 1.2em;
-            font-weight: 600;
-            padding: 15px 30px;
-            margin: 10px;
-            cursor: pointer;
-            border-radius: 8px;
-            border: none;
-            color: white;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
-        }
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-        }
-        button:active {
-            transform: translateY(0);
-            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
-        }
-
-        #startButton { background: linear-gradient(135deg, #4CAF50, #2E7D32); }
-        #stopButton { background: linear-gradient(135deg, #f44336, #c62828); }
-        
-        /* iframe (원격 데스크톱) 스타일 */
         iframe {
-            width: 100%;
-            height: 80vh; /* 화면 높이의 80% */
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            box-sizing: border-box; /* 패딩, 보더가 너비에 포함되도록 설정 */
+            border: 1px solid #ccc;
+            margin-top: 15px; /* 제목과 iframe 사이의 간격 */
         }
     </style>
 </head>
 <body>
 
-    <div class="control-panel">
-        <h1>Autoware 원격 제어 🕹️</h1>
-        <p>서버 연결 상태: <span id="status">연결 중...</span></p>
-        <div>
-            <button id="startButton" onclick="startAuto()">Auto 시작 (Engage)</button>
-            <button id="stopButton" onclick="stopAuto()">Auto 정지 (Disengage)</button>
-        </div>
-    </div>
+    <h2>🖥️ 원격 조작 화면</h2>
+    <p>해당 페이지에서 원격 조작을 할 수 있습니다.</p>
 
-<div class="vnc-panel">
-    <h1>원격 데스크톱 (VNC)</h1>
-    <iframe src="https://192.168.0.15:6080/vnc.html?path=websockify&password=123456">
-        <p>브라우저가 iframe을 지원하지 않습니다.</p>
+    <iframe
+        src="http://34.64.221.18:6080/vnc.html?host=34.64.221.18&port=6080"
+        width="1024"
+        height="768">
+        <p>사용 중인 브라우저가 iframe을 지원하지 않습니다.</p>
     </iframe>
-</div>
-
-<script type="text/javascript">
-    // 💡 wss 보안 프로토콜과 도메인, Nginx에 설정한 /ws/ 경로를 사용
-    const WEBSOCKET_URL = `wss://fml2.shop/ws/`;
-
-    const statusElement = document.getElementById("status");
-    let ws;
-
-        function connect() {
-            ws = new WebSocket(WEBSOCKET_URL);
-
-            ws.onopen = function() {
-                console.log('Connected to relay server.');
-                statusElement.innerHTML = "✅ 연결 성공";
-                statusElement.style.color = "green";
-                // 클라이언트임을 서버에 알림
-                ws.send(JSON.stringify({ type: 'register', clientType: 'client' }));
-            };
-
-            ws.onerror = function(error) {
-                console.log('Error connecting to relay server: ', error);
-                statusElement.innerHTML = "❌ 연결 실패";
-                statusElement.style.color = "red";
-            };
-
-            ws.onclose = function() {
-                console.log('Connection to relay server closed. Reconnecting...');
-                statusElement.innerHTML = "🔌 연결 끊김 (재시도 중...)";
-                statusElement.style.color = "orange";
-                // 1초 후에 재연결 시도
-                setTimeout(connect, 1000); 
-            };
-        }
-
-        function startAuto() {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                const command = {
-                    type: 'command',
-                    topic: '/autoware/engage',
-                    msg: { engage: true }
-                };
-                ws.send(JSON.stringify(command));
-                console.log('Sent engage command: true');
-                alert('자율주행 모드 시작 명령을 전송했습니다.');
-            } else {
-                alert('서버에 연결되지 않았습니다. 연결 상태를 확인해주세요.');
-            }
-        }
-
-        function stopAuto() {
-             if (ws && ws.readyState === WebSocket.OPEN) {
-                const command = {
-                    type: 'command',
-                    topic: '/autoware/engage',
-                    msg: { engage: false }
-                };
-                ws.send(JSON.stringify(command));
-                console.log('Sent engage command: false');
-                alert('자율주행 모드 정지 명령을 전송했습니다.');
-            } else {
-                alert('서버에 연결되지 않았습니다. 연결 상태를 확인해주세요.');
-            }
-        }
-
-        // 페이지 로드 시 바로 연결 시작
-        connect();
-    </script>
 
 </body>
 </html>
-
