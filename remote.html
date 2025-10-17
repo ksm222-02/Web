@@ -2,137 +2,30 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>Autoware 원격 통합 제어</title>
+    <title>원격 조작 페이지</title>
     <style>
         body {
             font-family: sans-serif;
             text-align: center;
-            margin: 20px;
-            background-color: #f4f4f9;
-        }
-        .container {
-            max-width: 1920px;
-            margin: auto;
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        h2 {
-            color: #333;
+            margin-top: 20px;
         }
         iframe {
-            border: 2px solid #ccc;
-            border-radius: 5px;
+            border: 1px solid #ccc;
             margin-top: 15px;
-        }
-        .control-panel {
-            margin-top: 30px;
-            padding: 20px;
-            border: 2px dashed #007bff;
-            border-radius: 10px;
-        }
-        .btn {
-            padding: 15px 30px;
-            font-size: 22px;
-            margin: 10px;
-            cursor: pointer;
-            border-radius: 8px;
-            border: none;
-            color: white;
-            font-weight: bold;
-        }
-        #engage-btn { background-color: #28a745; }
-        #disengage-btn { background-color: #dc3545; }
-        #status {
-            margin-top: 15px;
-            font-size: 18px;
-            font-weight: bold;
         }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h2>🖥️ 원격 조작 화면 (VNC)</h2>
-        <p>아래 화면을 통해 원격 데스크탑을 조작할 수 있습니다.</p>
-        <iframe
-            src="https://34.64.221.18:6080/vnc.html?host=34.64.221.18&port=6080"
-            width="100%"
-            height="800">
-            <p>사용 중인 브라우저가 iframe을 지원하지 않습니다.</p>
-        </iframe>
+    <h2>🖥️ 원격 조작 화면</h2>
+    <p>해당 페이지에서 원격 조작을 할 수 있습니다.</p>
 
-        <div class="control-panel">
-            <h2>⚙️ Autoware 제어판</h2>
-            <p id="status">연결 상태: 대기 중...</p>
-            <button id="engage-btn" class="btn">AUTO (Engage)</button>
-            <button id="disengage-btn" class="btn">STOP (Disengage)</button>
-        </div>
-    </div>
+    <iframe
+        src="https://34.64.221.18:6080/vnc.html?host=34.64.221.18&port=6080"
+        width="1920"
+        height="1080">
+        <p>사용 중인 브라우저가 iframe을 지원하지 않습니다.</p>
+    </iframe>
 
-    <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
-
-    <script>
-        // --- 설정 ---
-        // Autoware PC와 SSH 터널링으로 연결된 GCP 서버의 공인 IP를 입력하세요.
-        const gcp_ip = '34.64.221.18';
-        const ros_bridge_port = '9091'; // SSH 터널링에 사용한 포트
-        // ---
-
-        const statusElement = document.getElementById('status');
-        const engageBtn = document.getElementById('engage-btn');
-        const disengageBtn = document.getElementById('disengage-btn');
-
-        // ROS Bridge 서버에 연결
-        const ros = new ROSLIB.Ros({
-            url: `ws://${gcp_ip}:${ros_bridge_port}`
-        });
-
-        ros.on('connection', function() {
-            console.log('Connected to websocket server.');
-            statusElement.textContent = '✅ 연결 상태: Autoware와 연결됨';
-            statusElement.style.color = 'green';
-        });
-
-        ros.on('error', function(error) {
-            console.log('Error connecting to websocket server: ', error);
-            statusElement.textContent = '❌ 연결 상태: 오류 발생 (콘솔 확인)';
-            statusElement.style.color = 'red';
-        });
-
-        ros.on('close', function() {
-            console.log('Connection to websocket server closed.');
-            statusElement.textContent = '⚠️ 연결 상태: 연결 끊김';
-            statusElement.style.color = 'orange';
-        });
-
-        // 'engage' 토픽을 발행(publish)하기 위한 설정
-        const engageTopic = new ROSLIB.Topic({
-            ros: ros,
-            name: '/api/autoware/engage',
-            messageType: 'autoware_auto_vehicle_msgs/msg/Engage'
-        });
-
-        // AUTO 버튼 클릭 이벤트
-        engageBtn.addEventListener('click', () => {
-            const engageMsg = new ROSLIB.Message({
-                engage: true
-            });
-            engageTopic.publish(engageMsg);
-            console.log('Published engage: true');
-            alert('AUTO 명령을 전송했습니다.');
-        });
-
-        // STOP 버튼 클릭 이벤트
-        disengageBtn.addEventListener('click', () => {
-            const engageMsg = new ROSLIB.Message({
-                engage: false
-            });
-            engageTopic.publish(engageMsg);
-            console.log('Published engage: false');
-            alert('STOP 명령을 전송했습니다.');
-        });
-    </script>
 </body>
 </html>
