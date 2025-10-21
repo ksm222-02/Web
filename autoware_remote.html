@@ -57,11 +57,11 @@
 
         // 3. 보낼 메시지(Message) 정의
         const engageMsg = new ROSLIB.Message({
-            data: true // 'AUTO'
+            data: '{engage: true}' // 'AUTO'
         });
 
         const disengageMsg = new ROSLIB.Message({
-            data: false // 'STOP'
+            data: '{engage: false}' // 'STOP'
         });
 
         // 4. 버튼 클릭 이벤트 핸들러
