@@ -1,122 +1,81 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8" />
-<title>Autoware Remote Control</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  /* 간단한 스타일 추가 */
-  body {
-    font-family: sans-serif;
-    text-align: center;
-    margin-top: 50px;
-  }
-  h1 {
-    color: #333;
-  }
-  #status {
-    font-weight: bold;
-  }
-  button {
-    font-size: 1.2em;
-    padding: 15px 30px;
-    margin: 10px;
-    cursor: pointer;
-    border-radius: 8px;
-    border: 1px solid #ccc;
-    background-color: #f0f0f0;
-    transition: background-color 0.3s;
-  }
-  button:hover {
-    background-color: #e0e0e0;
-  }
-  #startButton {
-    background-color: #4CAF50; /* Green */
-    color: white;
-  }
-  #startButton:hover {
-    background-color: #45a049;
-  }
-  #stopButton {
-    background-color: #f44336; /* Red */
-    color: white;
-  }
-  #stopButton:hover {
-    background-color: #da190b;
-  }
-</style>
-
-<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
-
+    <title>Autoware Remote Control</title>
+    <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
+    
+    <style>
+        body { font-family: sans-serif; text-align: center; margin-top: 50px; }
+        button { font-size: 24px; padding: 20px 40px; margin: 10px; }
+        #autoBtn { background-color: #4CAF50; color: white; }
+        #stopBtn { background-color: #f44336; color: white; }
+        #status { font-size: 18px; color: #555; }
+    </style>
 </head>
 <body>
 
-  <h1>Autoware 원격 제어 🕹️</h1>
-  <p>연결 상태: <span id="status">연결 중...</span></p>
+    <h1>Autoware Control Panel</h1>
+    <div id="status">Connecting...</div>
+    <button id="autoBtn">AUTO (Engage)</button>
+    <button id="stopBtn">STOP (Disengage)</button>
 
-  <div>
-    <button id="startButton" onclick="startAuto()">Auto 시작 (Engage)</button>
-    <button id="stopButton" onclick="stopAuto()">Auto 정지 (Disengage)</button>
-  </div>
+    <script>
+        // 1. Cloudflare Tunnel에서 설정한 보안 WebSocket 주소
+        // 'wss://'를 사용해야 합니다.
+        const ROSBRIDGE_URL = 'wss://ros.your-domain.com'; 
 
-  <script type="text/javascript">
-    // 💡 Autoware가 실행 중인 PC의 IP 주소를 여기에 입력하세요.
-    // 만약 이 웹페이지를 여는 컴퓨터와 Autoware PC가 같다면 'localhost'를 사용해도 됩니다.
-    const AUTOWARE_IP = '34.64.221.18'; 
-    const WEBSOCKET_URL = `wss://${AUTOWARE_IP}/9090/`;
+        // 2. ROS 객체 생성 및 연결
+        const ros = new ROSLIB.Ros({
+            url: ROSBRIDGE_URL
+        });
 
-    // ROS 2 웹 브릿지에 연결
-    const ros = new ROSLIB.Ros({
-      url : WEBSOCKET_URL
-    });
+        // 연결 이벤트 처리
+        ros.on('connection', function() {
+            console.log('Connected to websocket server.');
+            document.getElementById('status').innerHTML = '✅ Connected';
+        });
 
-    const statusElement = document.getElementById("status");
+        ros.on('error', function(error) {
+            console.log('Error connecting to websocket server: ', error);
+            document.getElementById('status').innerHTML = '❌ Connection Error';
+        });
 
-    ros.on('connection', function() {
-      console.log('Connected to websocket server.');
-      statusElement.innerHTML = "✅ 연결 성공";
-      statusElement.style.color = "green";
-    });
+        ros.on('close', function() {
+            console.log('Connection to websocket server closed.');
+            document.getElementById('status').innerHTML = '🔌 Disconnected';
+        });
 
-    ros.on('error', function(error) {
-      console.log('Error connecting to websocket server: ', error);
-      statusElement.innerHTML = "❌ 연결 실패";
-      statusElement.style.color = "red";
-    });
+        // 3. 토픽(Topic) 객체 생성
+        // Autoware Universe의 engage 토픽과 메시지 타입
+        const engageTopic = new ROSLIB.Topic({
+            ros: ros,
+            name: '/autoware/engage',
+            messageType: 'autoware_vehicle_msgs/msg/Engage' // (Humble 기준)
+            // Autoware 버전에 따라 'autoware_auto_vehicle_msgs/msg/Engage' 일 수 있습니다.
+        });
 
-    ros.on('close', function() {
-      console.log('Connection to websocket server closed.');
-      statusElement.innerHTML = "🔌 연결 끊김";
-      statusElement.style.color = "orange";
-    });
+        // 4. 메시지(Message) 객체 생성
+        function publishEngage(isEngaged) {
+            // 메시지 구조: { stamp: ..., engage: ... }
+            // stamp는 rosbridge에서 자동으로 채워주는 경우가 많으나, 명시적으로 보낼 수도 있습니다.
+            const engageMsg = new ROSLIB.Message({
+                // stamp: { sec: 0, nanosec: 0 }, // 필요시 시간 정보 추가
+                engage: isEngaged 
+            });
 
-    // 'Engage' 토픽 설정
-    const engageTopic = new ROSLIB.Topic({
-      ros : ros,
-      name : '/autoware/engage',
-      messageType : 'autoware_auto_vehicle_msgs/msg/Engage'
-    });
+            console.log(`Publishing: ${isEngaged}`);
+            engageTopic.publish(engageMsg);
+        }
 
-    // 'Auto 시작 (Engage)' 버튼 클릭 시 호출
-    function startAuto() {
-      const engageMsg = new ROSLIB.Message({
-        engage: true
-      });
-      engageTopic.publish(engageMsg);
-      console.log('Published engage message: true');
-      alert('자율주행 모드 시작 명령을 전송했습니다.');
-    }
+        // 5. 버튼 이벤트 리스너 연결
+        document.getElementById('autoBtn').onclick = function() {
+            publishEngage(true);
+        };
 
-    // 'Auto 정지 (Disengage)' 버튼 클릭 시 호출
-    function stopAuto() {
-      const engageMsg = new ROSLIB.Message({
-        engage: false
-      });
-      engageTopic.publish(engageMsg);
-      console.log('Published engage message: false');
-      alert('자율주행 모드 정지 명령을 전송했습니다.');
-    }
-  </script>
+        document.getElementById('stopBtn').onclick = function() {
+            publishEngage(false);
+        };
 
+    </script>
 </body>
 </html>
