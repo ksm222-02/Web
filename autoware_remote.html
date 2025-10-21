@@ -61,7 +61,7 @@
         // --- 2. 토픽 발행(Publisher) 설정 ---
         var engagePublisher = new ROSLIB.Topic({
             ros: ros,
-            name: '/autoware/engage',
+            name: '/api/autoware/get/engage',
             messageType: 'autoware_auto_vehicle_msgs/msg/Engage'
         });
 
