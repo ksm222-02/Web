@@ -62,8 +62,8 @@
   <script type="text/javascript">
     // 💡 Autoware가 실행 중인 PC의 IP 주소를 여기에 입력하세요.
     // 만약 이 웹페이지를 여는 컴퓨터와 Autoware PC가 같다면 'localhost'를 사용해도 됩니다.
-    const AUTOWARE_IP = '34.64.221.18'; 
-    const WEBSOCKET_URL = "wss://ros.fml2.shop/rosbridge/";
+    const AUTOWARE_DOMAIN = 'fml2.shop'; 
+    const WEBSOCKET_URL = `wss://${AUTOWARE_DOMAIN}/rosbridge/`;
 
     // ROS 2 웹 브릿지에 연결
     const ros = new ROSLIB.Ros({
