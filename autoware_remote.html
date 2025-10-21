@@ -51,7 +51,7 @@
         // 2. 제어할 토픽(Topic) 설정
         const engageTopic = new ROSLIB.Topic({
             ros: ros,
-            name: '/api/autoware/get/engage', // 1단계에서 확인한 토픽 이름
+            name: '/autoware/engage', // 1단계에서 확인한 토픽 이름
             messageType: 'autoware_vehicle_msgs/msg/Engage' // 1단계에서 확인한 메시지 타입
         });
 
