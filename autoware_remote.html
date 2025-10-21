@@ -2,91 +2,80 @@
 <html>
 <head>
     <title>Autoware Remote Control</title>
-    <meta charset="utf-8">
+    <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; margin-top: 50px; }
-        button { font-size: 24px; padding: 20px 40px; margin: 10px; cursor: pointer; }
-        #autoButton { background-color: #4CAF50; color: white; border: none; }
-        #stopButton { background-color: #f44336; color: white; border: none; }
+        button { font-size: 24px; padding: 20px 40px; margin: 10px; }
+        #autoButton { background-color: #4CAF50; color: white; }
+        #stopButton { background-color: #f44336; color: white; }
         #status { margin-top: 20px; font-size: 18px; }
     </style>
 </head>
 <body>
 
     <h1>Autoware 원격 제어</h1>
-    
     <button id="autoButton">AUTO</button>
     <button id="stopButton">STOP</button>
-
     <div id="status">연결 상태: 대기 중...</div>
 
-    <script src="roslib.js"></script>
-
     <script>
-        // --- 1. rosbridge 서버 주소 설정 ---
-        // !!! 중요 !!!
-        // Autoware PC(rosbridge 실행 PC)의 IP 주소로 변경하세요.
-        // 예: 'ws://192.168.1.100:9090'
-        // GCP 등 외부 서버를 경유한다면 해당 서버의 주소입니다.
-        const rosbridgeHost = 'wws://192.168.0.15:9090'; 
-        // ------------------------------------
+        // Autoware가 실행 중인 컴퓨터의 IP 주소를 입력하세요.
+        // 만약 이 HTML 파일을 Autoware 컴퓨터에서 바로 연다면 'localhost'를 사용해도 됩니다.
+        const AUTOWARE_IP = "localhost"; 
+        const statusDiv = document.getElementById('status');
 
-        const statusElement = document.getElementById('status');
-        const autoButton = document.getElementById('autoButton');
-        const stopButton = document.getElementById('stopButton');
-
-        // ROS Bridge 연결 객체 생성
-        var ros = new ROSLIB.Ros({
-            url: rosbridgeHost
+        // 1. ROS WebSocket 서버에 연결
+        const ros = new ROSLIB.Ros({
+            url: `ws://${AUTOWARE_IP}:9090`
         });
 
-        // 연결 성공 시
+        // 연결 이벤트 핸들러
         ros.on('connection', function() {
             console.log('Connected to websocket server.');
-            statusElement.innerHTML = '연결 상태: 연결됨';
+            statusDiv.innerHTML = "연결 상태: 연결됨";
+            statusDiv.style.color = "green";
         });
 
-        // 연결 오류 시
         ros.on('error', function(error) {
             console.log('Error connecting to websocket server: ', error);
-            statusElement.innerHTML = '연결 상태: 오류 발생 (주소 확인 필요)';
+            statusDiv.innerHTML = "연결 상태: 오류 (IP 주소나 rosbridge 실행 여부 확인)";
+            statusDiv.style.color = "red";
         });
 
-        // 연결 종료 시
         ros.on('close', function() {
             console.log('Connection to websocket server closed.');
-            statusElement.innerHTML = '연결 상태: 연결 끊김';
+            statusDiv.innerHTML = "연결 상태: 연결 끊김";
+            statusDiv.style.color = "red";
         });
 
-        // --- 2. 토픽 발행(Publisher) 설정 ---
-        var engagePublisher = new ROSLIB.Topic({
+        // 2. 제어할 토픽(Topic) 설정
+        const engageTopic = new ROSLIB.Topic({
             ros: ros,
-            name: '/api/autoware/get/engage',
-            messageType: 'autoware_auto_vehicle_msgs/msg/Engage'
+            name: '/autoware/engage', // 1단계에서 확인한 토픽 이름
+            messageType: 'std_msgs/msg/Bool' // 1단계에서 확인한 메시지 타입
         });
 
-        // --- 3. 메시지 객체 생성 ---
-        var autoMessage = new ROSLIB.Message({
-            engage: true
+        // 3. 보낼 메시지(Message) 정의
+        const engageMsg = new ROSLIB.Message({
+            data: true // 'AUTO'
         });
 
-        var stopMessage = new ROSLIB.Message({
-            engage: false
+        const disengageMsg = new ROSLIB.Message({
+            data: false // 'STOP'
         });
 
-        // --- 4. 버튼 클릭 이벤트 리스너 ---
-        autoButton.onclick = function() {
-            console.log('Publishing AUTO message (true)');
-            engagePublisher.publish(autoMessage);
-            statusElement.innerHTML = '명령 전송: AUTO';
+        // 4. 버튼 클릭 이벤트 핸들러
+        document.getElementById('autoButton').onclick = function() {
+            console.log('Publishing: AUTO (true)');
+            engageTopic.publish(engageMsg);
+            statusDiv.innerHTML = "명령: AUTO 전송";
         };
 
-        stopButton.onclick = function() {
-            console.log('Publishing STOP message (false)');
-            engagePublisher.publish(stopMessage);
-            statusElement.innerHTML = '명령 전송: STOP';
+        document.getElementById('stopButton').onclick = function() {
+            console.log('Publishing: STOP (false)');
+            engageTopic.publish(disengageMsg);
+            statusDiv.innerHTML = "명령: STOP 전송";
         };
-
     </script>
 
 </body>
