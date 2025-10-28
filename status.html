@@ -1,255 +1,258 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Autoware 실시간 데이터 그래프</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            cursor: crosshair; /* 페이지 기본 커서를 십자 모양으로 변경 */
-            background-color: #f9f9f9;
-            margin: 0;
-            padding: 20px;
-        }
-        h1, h3 { /* h2 -> h3로 수정 */
-            text-align: center;
-            color: #333;
-        }
+import asyncio
+import json
+import logging
+import time
+import platform
+import os
+import threading  # <-- 1. 잠금장치 임포트
 
-        /* [수정] 차트 컨테이너 레이아웃 변경 */
-        .charts-wrapper {
-            display: flex;
-            flex-wrap: wrap; /* 화면이 좁아지면 줄바꿈 */
-            justify-content: center;
-            gap: 20px;
-            width: 95%;
-            margin: 20px auto;
-        }
-        .chart-container {
-            width: 100%;
-            max-width: 600px; /* 차트 최대 너비 고정 */
-            background-color: #fff;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        }
+import websockets
+import mss
+import pyautogui
+import numpy as np
+from av import VideoFrame
+from PIL import Image, ImageDraw
 
-        /* 차트 위에서는 손가락 모양으로 */
-        canvas {
-            cursor: pointer;
-        }
-       
-        #lastUpdateTime {
-            text-align: center;
-            font-size: 0.9em;
-            color: #666;
-            margin-top: 15px;
-        }
+from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+from aiortc.contrib.media import MediaRelay
 
-        /* --- [제거] 가상 키보드 스타일 --- */
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("host")
 
-    </style>
-</head>
-<body>
-    <h1>Autoware 차량 실시간 데이터</h1>
-   
-    <!-- [수정] 차트들을 감싸는 래퍼 추가 -->
-    <div class="charts-wrapper"> <!-- [오타 수정] class. -> class= -->
-        <div class="chart-container">
-            <h3>차량 속도 (m/s) (/vehicle/status/velocity_status)</h3>
-            <canvas id="autowareSpeedChart"></canvas>
-        </div>
-       
-        <!-- [제거] X/Y 좌표 차트 컨테이너 -->
-       
-        <!-- [추가] Likelihood 차트 컨테이너 -->
-        <div class="chart-container">
-            <h3>Voxel Likelihood (/localization/.../likelihood)</h3>
-            <canvas id="autowareLikelihoodChart"></canvas>
-        </div>
-
-        <!-- [추가] Accuracy 차트 컨테이너 -->
-        <div class="chart-container">
-            <h3>Localization Accuracy (m) (/localization_accuracy)</h3>
-            <canvas id="autowareAccuracyChart"></canvas>
-        </div>
-
-        <!-- [추가] Steering 차트 컨테이너 -->
-        <div class="chart-container">
-            <h3>Steering Status (Angle) (/vehicle/status/steering_status)</h3>
-            <canvas id="autowareSteeringChart"></canvas>
-        </div>
-    </div>
-    <p id="lastUpdateTime">마지막 업데이트: 로딩 중...</p>
-
-    <!-- --- [제거] 가상 키보드 HTML --- -->
+# ▼▼▼ 2. 모든 pyautogui 호출을 보호할 잠금장치 생성 ▼▼▼
+pyautogui_lock = threading.Lock()
+# ▲▲▲ 2. 모든 pyautogui 호출을 보호할 잠금장치 생성 ▲▲▲
 
 
-    <script>
-        // =============================================
-        // === 1. 차트 스크립트 ===
-        // =============================================
-       
-        // 그래프 객체를 저장할 전역 변수
-        let speedChart;
-        // [제거] let trajectoryChart;
-        let likelihoodChart; // [추가]
-        let accuracyChart;   // [추가]
-        let steeringChart;   // [추가]
+# --- 1. "카메라" (화면 캡처) ---
+relay = MediaRelay()
 
-        // [수정] 로컬 Flask 서버(app.py) 주소로 변경 (테스트용)
-        // Cloudflare 배포 시: 'https://api.fml1.store'
-        const FLASK_API_BASE_URL = 'http://127.0.0.1:5001';
-       
-        // 5초마다 API를 호출하여 데이터를 갱신하고 그래프를 다시 그리는 함수
-        function fetchAndDrawGraph() {
-           
-            fetch(FLASK_API_BASE_URL + '/api/autoware')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP 오류! 서버 상태: ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // [수정] app.py에서 오는 모든 데이터 로드
-                    const labels = data.labels;
-                    const speedValues = data.speed;
-                    // [제거] const xValues = data.x;
-                    // [제거] const yValues = data.y;
-                    const likelihoodValues = data.likelihood; // [추가]
-                    const accuracyValues = data.accuracy;     // [추가]
-                    const steeringValues = data.steering;     // [추가]
+try:
+    with mss.mss() as sct_check:
+        monitor_info = sct_check.monitors[0] # 0번 모니터 (전체)
+except mss.exception.ScreenShotError as e:
+    logger.error(f"mss 초기화 실패: {e}")
+    monitor_info = {'left': 0, 'top': 0, 'width': 1920, 'height': 1080}
 
-                    // --- 1. 속도 차트 업데이트 ---
-                    const speedCtx = document.getElementById('autowareSpeedChart').getContext('2d');
-                   
-                    if (speedChart) {
-                        speedChart.data.labels = labels;
-                        speedChart.data.datasets[0].data = speedValues;
-                        speedChart.update();
-                    } else {
-                        speedChart = new Chart(speedCtx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: '차량 속도 (m/s)',
-                                    data: speedValues,
-                                    backgroundColor: 'rgba(255, 99, 132, 0.4)',
-                                    borderColor: 'rgba(255, 99, 132, 1)',
-                                    borderWidth: 2,
-                                    tension: 0.1,
-                                    fill: true
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                animation: { duration: 0 },
-                                scales: {
-                                    y: {
-                                        beginAtZero: true,
-                                        title: { display: true, text: '속도 (m/s)' }
-                                    }
-                                }
-                            }
-                        });
-                    }
+logger.info(f"캡처할 모니터 정보: {monitor_info}")
 
-                    // --- 2. [제거] X/Y 경로 차트 ---
-                   
-                    // --- 3. [추가] Likelihood 차트 ---
-                    const likelihoodCtx = document.getElementById('autowareLikelihoodChart').getContext('2d');
-                    if (likelihoodChart) {
-                        likelihoodChart.data.labels = labels;
-                        likelihoodChart.data.datasets[0].data = likelihoodValues;
-                        likelihoodChart.update();
-                    } else {
-                        likelihoodChart = new Chart(likelihoodCtx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: 'Likelihood',
-                                    data: likelihoodValues,
-                                    backgroundColor: 'rgba(75, 192, 192, 0.4)',
-                                    borderColor: 'rgba(75, 192, 192, 1)',
-                                    borderWidth: 2, tension: 0.1, fill: true
-                                }]
-                            },
-                            options: { responsive: true, animation: { duration: 0 }, scales: { y: { beginAtZero: false, title: { display: true, text: 'Score' } } } }
-                        });
-                    }
+def grab_screen_and_mouse(monitor):
+    """
+    별도 스레드에서 mss/pyautogui 호출 (잠금 사용)
+    """
+    pos = (0, 0)
+    img = None
+    
+    # ▼▼▼ 3. 잠금장치 사용 ▼▼▼
+    with pyautogui_lock:
+        try:
+            # pyautogui.position() 호출
+            pos = pyautogui.position() 
+        except Exception as e:
+            # (DISPLAY 문제 등으로 실패 시 경고만)
+            logger.warning(f"pyautogui.position() 실패: {e}")
+            pos = (0, 0) 
 
-                    // --- 4. [추가] Accuracy 차트 ---
-                    const accuracyCtx = document.getElementById('autowareAccuracyChart').getContext('2d');
-                    if (accuracyChart) {
-                        accuracyChart.data.labels = labels;
-                        accuracyChart.data.datasets[0].data = accuracyValues;
-                        accuracyChart.update();
-                    } else {
-                        accuracyChart = new Chart(accuracyCtx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: 'Accuracy',
-                                    data: accuracyValues,
-                                    backgroundColor: 'rgba(153, 102, 255, 0.4)',
-                                    borderColor: 'rgba(153, 102, 255, 1)',
-                                    borderWidth: 2, tension: 0.1, fill: true
-                                }]
-                            },
-                            options: { responsive: true, animation: { duration: 0 }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Error (m)' } } } }
-                        });
-                    }
-                   
-                    // --- 5. [추가] Steering 차트 ---
-                    const steeringCtx = document.getElementById('autowareSteeringChart').getContext('2d');
-                    if (steeringChart) {
-                        steeringChart.data.labels = labels;
-                        steeringChart.data.datasets[0].data = steeringValues;
-                        steeringChart.update();
-                    } else {
-                        steeringChart = new Chart(steeringCtx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: 'Steering',
-                                    data: steeringValues,
-                                    backgroundColor: 'rgba(255, 159, 64, 0.4)',
-                                    borderColor: 'rgba(255, 159, 64, 1)',
-                                    borderWidth: 2, tension: 0.1, fill: true
-                                }]
-                            },
-                            options: { responsive: true, animation: { duration: 0 }, scales: { y: { beginAtZero: false, title: { display: true, text: 'Angle' } } } }
-                        });
-                    }
-                   
-                    // 마지막 업데이트 시간 표시
-                    document.getElementById('lastUpdateTime').textContent = '마지막 업데이트: ' + new Date().toLocaleTimeString('ko-KR');
+        with mss.mss() as sct:
+            img = sct.grab(monitor)
+    # ▲▲▲ 3. 잠금장치 사용 ▲▲▲
+    
+    return img, pos
 
-                })
-                .catch(error => {
-                    console.error('데이터 로드 오류:', error);
-                    document.getElementById('lastUpdateTime').innerHTML = `<span style="color:red;">데이터 로드 실패: ${error.message} (서버 주소 및 방화벽 확인)</span>`;
-                });
-        }
 
-        // 페이지 로드 시 즉시 실행
-        fetchAndDrawGraph();
+class ScreenCaptureTrack(VideoStreamTrack):
+    """
+    마우스 커서 그리기 포함
+    """
+    def __init__(self):
+        super().__init__()
+        self.counter = 0
+        self.start_time = time.time()
+        self.loop = asyncio.get_event_loop()
+        self.monitor = monitor_info
 
-        // 2초(2000ms)마다 자동으로 데이터를 갱신
-        setInterval(fetchAndDrawGraph, 2000);
+    async def recv(self):
+        pts, time_base = await self.next_timestamp()
 
-       
-        // =============================================
-        // === 2. [제거] 가상 키보드 스크립트 ===
-        // =============================================
-       
+        try:
+            # 헬퍼 함수 호출 (이 함수는 내부적으로 lock을 사용)
+            img_bgra, mouse_pos = await self.loop.run_in_executor(
+                None, grab_screen_and_mouse, self.monitor
+            )
+            
+            pil_img = Image.frombytes("RGBA", img_bgra.size, img_bgra.bgra, "raw", "BGRA")
+            
+            x = mouse_pos[0] - self.monitor['left']
+            y = mouse_pos[1] - self.monitor['top']
 
-    </script>
-</body>
-</html>
+            if 0 <= x < self.monitor['width'] and 0 <= y < self.monitor['height']:
+                draw = ImageDraw.Draw(pil_img)
+                draw.line((x - 10, y, x + 10, y), fill='black', width=4)
+                draw.line((x, y - 10, x, y + 10), fill='black', width=4)
+                draw.line((x - 10, y, x + 10, y), fill='white', width=2)
+                draw.line((x, y - 10, x, y + 10), fill='white', width=2)
+            
+            img_bgra_np = np.array(pil_img)
+
+        except mss.exception.ScreenShotError as e:
+            logger.error(f"화면 캡처 실패: {e}")
+            img_bgra_data = bytes(self.monitor['width'] * self.monitor['height'] * 4)
+            img_bgra_np = np.frombuffer(img_bgra_data, dtype=np.uint8).reshape((self.monitor['height'], self.monitor['width'], 4))
+        
+        img_bgr = img_bgra_np[:, :, [2, 1, 0]]
+        
+        frame = VideoFrame.from_ndarray(img_bgr, format="bgr24")
+        frame.pts = pts
+        frame.time_base = time_base
+        
+        self.counter += 1
+        elapsed = time.time() - self.start_time
+        if elapsed > 1.0:
+            fps = self.counter / elapsed
+            logger.info(f"Screen Capture FPS: {fps:.1f}")
+            self.counter = 0
+            self.start_time = time.time()
+            
+        return frame
+
+# --- 2. "로봇" (입력 제어) ---
+def handle_control_message(message_str):
+    """
+    이 함수는 이제 run_in_executor에 의해 별도 스레드에서 호출됩니다.
+    """
+    # ▼▼▼ 4. 제어 작업도 잠금장치 사용 ▼▼▼
+    with pyautogui_lock:
+        try:
+            message_json = json.loads(message_str)
+            msg_type = message_json.get("type")
+
+            if msg_type == "mousemove":
+                x = message_json.get("x")
+                y = message_json.get("y")
+                if x is not None and y is not None:
+                    pyautogui.moveTo(int(x), int(y)) 
+                
+            elif msg_type == "mousedown":
+                pyautogui.mouseDown(button=message_json.get("button", "left"))
+                
+            elif msg_type == "mouseup":
+                pyautogui.mouseUp(button=message_json.get("button", "left"))
+                
+            elif msg_type == "keydown":
+                key = message_json.get("key")
+                if key is not None: 
+                    if len(key) > 1 and key not in ['ctrl', 'alt', 'shift', 'cmd', 'enter', 'esc']:
+                         key = key.lower() 
+                    pyautogui.keyDown(key)
+                
+            elif msg_type == "keyup":
+                key = message_json.get("key")
+                if key is not None: 
+                    if len(key) > 1 and key not in ['ctrl', 'alt', 'shift', 'cmd', 'enter', 'esc']:
+                         key = key.lower()
+                    pyautogui.keyUp(key)
+
+            elif msg_type == "wheel":
+                deltaY = message_json.get("deltaY")
+                if deltaY is not None:
+                    scroll_amount = int(deltaY / 10)
+                    pyautogui.scroll(scroll_amount)
+                
+        except Exception as e:
+            logger.error(f"제어 메시지 처리 중 오류: {e}", exc_info=True)
+    # ▲▲▲ 4. 제어 작업도 잠금장치 사용 ▲▲▲
+
+# --- 3. "전화기" (WebRTC + 시그널링) ---
+
+# ▼▼▼ 5. loop와 pc를 전역 스코프로 이동 ▼▼▼
+pc = RTCPeerConnection()
+loop = asyncio.get_event_loop()
+# ▲▲▲ 5. loop와 pc를 전역 스코프로 이동 ▲▲▲
+
+@pc.on("datachannel")
+def on_datachannel(channel):
+    logger.info(f"데이터 채널 수신: {channel.label}")
+    
+    @channel.on("message")
+    def on_message(message):
+        # ▼▼▼ 6. 제어 함수를 별도 스레드로 보내기 (메인 스레드 block 방지) ▼▼▼
+        loop.run_in_executor(None, handle_control_message, message)
+        # ▲▲▲ 6. 제어 함수를 별도 스레드로 보내기 (메인 스레드 block 방지) ▲▲▲
+
+@pc.on("iceconnectionstatechange")
+async def on_iceconnectionstatechange():
+    logger.info(f"ICE 연결 상태 변경: {pc.iceConnectionState}")
+    if pc.iceConnectionState == "failed":
+        await pc.close()
+
+async def run_host():
+    logger.info("호스트 프로그램 시작")
+    
+    video_track = ScreenCaptureTrack()
+    pc.addTrack(relay.subscribe(video_track))
+    
+    signaling_server_url = "ws://192.168.0.9:8765" # (C++ 서버 IP로 수정 필요)
+    
+    try:
+        async with websockets.connect(signaling_server_url) as ws:
+            logger.info("시그널링 서버에 접속 완료")
+            
+            async for message_str in ws:
+                message = json.loads(message_str)
+                
+                if "offer" in message:
+                    offer_sdp = RTCSessionDescription(sdp=message["offer"]["sdp"], type=message["offer"]["type"])
+                    logger.info("클라이언트로부터 Offer 수신")
+                    
+                    await pc.setRemoteDescription(offer_sdp)
+                    answer_sdp = await pc.createAnswer()
+                    await pc.setLocalDescription(answer_sdp)
+                    
+                    await ws.send(json.dumps({
+                        "answer": {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+                    }))
+                    logger.info("Answer 생성 및 전송 완료")
+                    
+                elif "candidate" in message:
+                    if message["candidate"]:
+                        candidate_data = message["candidate"]
+                        
+                        candidate_string = candidate_data.get("candidate", "")
+                        if candidate_string and ":" in candidate_string:
+                            from aiortc.sdp import candidate_from_sdp
+                            
+                            ice_candidate = candidate_from_sdp(candidate_string.split(":", 1)[1])
+                            ice_candidate.sdpMid = candidate_data["sdpMid"]
+                            ice_candidate.sdpMLineIndex = candidate_data["sdpMLineIndex"]
+                            
+                            await pc.addIceCandidate(ice_candidate)
+                            logger.info("ICE Candidate 추가 완료")
+                        else:
+                            logger.info("비어있는 ICE Candidate 수신 (무시함)")
+                    
+    except ConnectionRefusedError:
+        logger.error(f"시그널링 서버({signaling_server_url})에 연결할 수 없습니다. 1단계 C++ 서버가 실행 중인지, IP 주소가 올바른지 확인하세요.")
+    except Exception as e:
+        logger.error(f"시그널링 중 오류: {e}", exc_info=True)
+    finally:
+        logger.info("호스트 프로그램 정리 중...")
+        await pc.close()
+
+if __name__ == "__main__":
+    if platform.system() == "Linux":
+        # ▼▼▼ 7. X11 스레드 초기화 (중요) ▼▼▼
+        # pyautogui가 Xlib 스레드 지원을 활성화하도록 합니다.
+        import Xlib.threaded
+        # ▲▲▲ 7. X11 스레드 초기화 (중요) ▲▲▲
+        logger.info(f"Linux($DISPLAY={os.getenv('DISPLAY')}) 환경에서 실행합니다.")
+        pyautogui.FAILSAFE = False
+        pyautogui.PAUSE = 0
+    
+    # (loop는 이미 전역으로 이동)
+    try:
+        loop.run_until_complete(run_host())
+    except KeyboardInterrupt:
+        logger.info("사용자에 의해 중지됨")
+    finally:
+        loop.run_until_complete(pc.close())
+        logger.info("호스트 프로그램 종료")
