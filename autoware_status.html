@@ -81,7 +81,7 @@
         function fetchAndDrawGraph() {
             
             // Nginx 경로에 맞게 호출 (// 이중 슬래시 문제 해결됨)
-            fetch(FLASK_API_BASE_URL + '/api/autoware') 
+            fetch(FLASK_API_BASE_URL + '/api/status') 
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`HTTP 오류! 서버 상태: ${response.status}`);
