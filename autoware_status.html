@@ -14,97 +14,116 @@
             font-size: 0.9em;
             color: #666;
         }
+        #error-message {
+            text-align: center;
+            font-size: 0.9em;
+            color: red;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
     <h1>Autoware 차량 실시간 데이터</h1>
-   
+    
     <div class="chart-container">
         <canvas id="autowareSpeedChart"></canvas>
         <p id="lastUpdateTime">마지막 업데이트: 로딩 중...</p>
+        <p id="error-message"></p>
     </div>
 
     <script>
         let speedChart; // 그래프 객체를 저장할 전역 변수
-       
-        // 🚨 1. [필수 수정] Flask 서버의 '공인 IP' 주소를 여기에 입력하세요.
-        // 이전에 확인된 내부 IP(192.168.0.5)가 아닌, 외부에서 접속 가능한 공인 IP여야 합니다.
-        // 예시: 'http://110.12.123.123:5000'
-        const FLASK_API_BASE_URL = 'https://34.158.192.223:8080/';
+        const MAX_DATA_POINTS = 20; // 그래프에 표시할 최대 데이터 개수
 
-       
-        // 5초마다 API를 호출하여 데이터를 갱신하고 그래프를 다시 그리는 함수
+        // 🚨 1. [수정됨] Nginx 프록시 도메인 주소로 변경 (포트 8080 제거)
+        // 이 주소로 API를 호출해야 Nginx가 443 포트에서 요청을 받아 처리합니다.
+        const FLASK_API_BASE_URL = 'https://ros.fml2.shop';
+
+        
+        // 2. [신규] 그래프를 처음에 한 번만 초기화하는 함수
+        function initializeChart() {
+            // [수정됨] 'd'가 아닌 '2d'가 올바른 context ID입니다.
+            const ctx = document.getElementById('autowareSpeedChart').getContext('2d');
+            
+            speedChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [], // 빈 값으로 시작
+                    datasets: [{
+                        label: '차량 속도 (m/s)',
+                        data: [], // 빈 값으로 시작
+                        backgroundColor: 'rgba(255, 99, 132, 0.4)',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 2,
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    animation: {
+                        duration: 0 // 업데이트 시 애니메이션을 끔
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '속도 (m/s)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 3. [수정됨] API를 호출하여 실시간 데이터를 차트에 '추가'하는 함수
         function fetchAndDrawGraph() {
-           
-            // 2. [수정됨] Flask 서버의 전체 API 경로로 요청
-            fetch(FLASK_API_BASE_URL + '/api/autoware')
+            
+            // Nginx 경로에 맞게 호출 (// 이중 슬래시 문제 해결됨)
+            fetch(FLASK_API_BASE_URL + '/api/autoware') 
                 .then(response => {
                     if (!response.ok) {
-                        // 404, 500 등 서버 응답 오류 처리
                         throw new Error(`HTTP 오류! 서버 상태: ${response.status}`);
                     }
                     return response.json();
                 })
                 .then(data => {
-                    const labels = data.labels;
-                    const speedValues = data.speed;
+                    // Python API가 반환하는 단일 데이터를 가져옵니다.
+                    // (기존 data.labels, data.speed -> 신규 data.time, data.speed_mps)
+                    const newLabel = new Date(data.time).toLocaleTimeString('ko-KR');
+                    const newSpeed = data.speed_mps;
 
-                    const ctx = document.getElementById('autowareSpeedChart').getContext('d');
-                   
-                    if (speedChart) {
-                        // 기존 그래프가 있으면 데이터를 갱신합니다.
-                        speedChart.data.labels = labels;
-                        speedChart.data.datasets[0].data = speedValues;
-                        speedChart.update(); // 그래프 업데이트 명령
-                    } else {
-                        // 최초 로드 시 그래프를 생성합니다.
-                        speedChart = new Chart(ctx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: '차량 속도 (m/s)',
-                                    data: speedValues,
-                                    backgroundColor: 'rgba(255, 99, 132, 0.4)',
-                                    borderColor: 'rgba(255, 99, 132, 1)',
-                                    borderWidth: 2,
-                                    tension: 0.1, // 부드러운 선
-                                    fill: true
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                animation: {
-                                    duration: 0 // 업데이트 시 애니메이션을 끔
-                                },
-                                scales: {
-                                    y: {
-                                        beginAtZero: true,
-                                        title: {
-                                            display: true,
-                                            text: '속도 (m/s)'
-                                        }
-                                    }
-                                }
-                            }
-                        });
+                    // 차트 데이터에 새 값을 추가
+                    speedChart.data.labels.push(newLabel);
+                    speedChart.data.datasets[0].data.push(newSpeed);
+
+                    // 그래프가 너무 길어지지 않도록 최대 개수 제한
+                    if (speedChart.data.labels.length > MAX_DATA_POINTS) {
+                        speedChart.data.labels.shift(); // 가장 오래된 라벨 제거
+                        speedChart.data.datasets[0].data.shift(); // 가장 오래된 데이터 제거
                     }
-                   
+                    
+                    speedChart.update(); // 그래프 업데이트
+
                     // 마지막 업데이트 시간 표시
                     document.getElementById('lastUpdateTime').textContent = '마지막 업데이트: ' + new Date().toLocaleTimeString('ko-KR');
-
+                    document.getElementById('error-message').textContent = ''; // 오류 메시지 초기화
                 })
                 .catch(error => {
-                    // 3. [수정됨] 네트워크 오류 또는 CORS 오류 시 메시지 표시
+                    // 네트워크 오류 또는 CORS 오류 시 메시지 표시
                     console.error('데이터 로드 오류:', error);
-                    document.getElementById('lastUpdateTime').innerHTML = `<span style="color:red;">데이터 로드 실패: ${error.message} (서버 주소 및 방화벽 확인)</span>`;
+                    document.getElementById('error-message').textContent = `데이터 로드 실패: ${error.message}`;
                 });
         }
 
-        // 4. 페이지 로드 시 즉시 실행
+        // 4. 페이지 로드 시 그래프 초기화
+        initializeChart();
+        
+        // 5. 즉시 1회 실행
         fetchAndDrawGraph();
 
-        // 5. 2초(2000ms)마다 자동으로 데이터를 갱신
+        // 6. 2초(2000ms)마다 자동으로 데이터를 갱신
         setInterval(fetchAndDrawGraph, 2000);
     </script>
 </body>
