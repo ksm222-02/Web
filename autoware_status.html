@@ -100,12 +100,12 @@
 
         // [수정] 로컬 Flask 서버(app.py) 주소로 변경 (테스트용)
         // Cloudflare 배포 시: 'https://api.fml1.store'
-        const FLASK_API_BASE_URL = 'http://127.0.0.1:5001';
+        const FLASK_API_BASE_URL = 'https://ros.fml2.shop';
        
         // 5초마다 API를 호출하여 데이터를 갱신하고 그래프를 다시 그리는 함수
         function fetchAndDrawGraph() {
            
-            fetch(FLASK_API_BASE_URL + '/api/autoware')
+            fetch(FLASK_API_BASE_URL + '/api/status')
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`HTTP 오류! 서버 상태: ${response.status}`);
