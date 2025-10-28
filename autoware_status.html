@@ -4,22 +4,21 @@
     <title>Autoware 실시간 데이터 그래프</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        /* [스타일은 원본과 동일하게 유지] */
         body {
             font-family: Arial, sans-serif;
-            cursor: crosshair; /* 페이지 기본 커서를 십자 모양으로 변경 */
+            cursor: crosshair;
             background-color: #f9f9f9;
             margin: 0;
             padding: 20px;
         }
-        h1, h3 { /* h2 -> h3로 수정 */
+        h1, h3 {
             text-align: center;
             color: #333;
         }
-
-        /* [수정] 차트 컨테이너 레이아웃 변경 */
         .charts-wrapper {
             display: flex;
-            flex-wrap: wrap; /* 화면이 좁아지면 줄바꿈 */
+            flex-wrap: wrap;
             justify-content: center;
             gap: 20px;
             width: 95%;
@@ -27,55 +26,43 @@
         }
         .chart-container {
             width: 100%;
-            max-width: 600px; /* 차트 최대 너비 고정 */
+            max-width: 600px;
             background-color: #fff;
             border: 1px solid #ddd;
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
         }
-
-        /* 차트 위에서는 손가락 모양으로 */
         canvas {
             cursor: pointer;
         }
-       
         #lastUpdateTime {
             text-align: center;
             font-size: 0.9em;
             color: #666;
             margin-top: 15px;
         }
-
-        /* --- [제거] 가상 키보드 스타일 --- */
-
     </style>
 </head>
 <body>
     <h1>Autoware 차량 실시간 데이터</h1>
-   
-    <!-- [수정] 차트들을 감싸는 래퍼 추가 -->
-    <div class="charts-wrapper"> <!-- [오타 수정] class. -> class= -->
+    
+    <div class="charts-wrapper">
         <div class="chart-container">
             <h3>차량 속도 (m/s) (/vehicle/status/velocity_status)</h3>
             <canvas id="autowareSpeedChart"></canvas>
         </div>
-       
-        <!-- [제거] X/Y 좌표 차트 컨테이너 -->
-       
-        <!-- [추가] Likelihood 차트 컨테이너 -->
+        
         <div class="chart-container">
             <h3>Voxel Likelihood (/localization/.../likelihood)</h3>
             <canvas id="autowareLikelihoodChart"></canvas>
         </div>
 
-        <!-- [추가] Accuracy 차트 컨테이너 -->
         <div class="chart-container">
             <h3>Localization Accuracy (m) (/localization_accuracy)</h3>
             <canvas id="autowareAccuracyChart"></canvas>
         </div>
 
-        <!-- [추가] Steering 차트 컨테이너 -->
         <div class="chart-container">
             <h3>Steering Status (Angle) (/vehicle/status/steering_status)</h3>
             <canvas id="autowareSteeringChart"></canvas>
@@ -83,29 +70,74 @@
     </div>
     <p id="lastUpdateTime">마지막 업데이트: 로딩 중...</p>
 
-    <!-- --- [제거] 가상 키보드 HTML --- -->
-
 
     <script>
         // =============================================
-        // === 1. 차트 스크립트 ===
+        // === 1. 차트 스크립트 (로직 수정됨) ===
         // =============================================
-       
-        // 그래프 객체를 저장할 전역 변수
-        let speedChart;
-        // [제거] let trajectoryChart;
-        let likelihoodChart; // [추가]
-        let accuracyChart;   // [추가]
-        let steeringChart;   // [추가]
+        
+        let speedChart, likelihoodChart, accuracyChart, steeringChart;
+        const MAX_DATA_POINTS = 30; // 그래프에 표시할 최대 데이터 개수
 
-        // [수정] 로컬 Flask 서버(app.py) 주소로 변경 (테스트용)
-        // Cloudflare 배포 시: 'https://api.fml1.store'
-        const FLASK_API_BASE_URL = 'https://ros.fml2.shop';
-       
-        // 5초마다 API를 호출하여 데이터를 갱신하고 그래프를 다시 그리는 함수
+        // 🚨 1. [수정] Nginx에 설정한 '도메인' 주소로 변경
+        const FLASK_API_BASE_URL = 'https://ros.fml2.shop'; 
+        
+        // 2. [신규] 4개의 차트를 생성하는 헬퍼 함수
+        function createChart(ctx, label, colorRgb) {
+            return new Chart(ctx, {
+                type: 'line', 
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: label,
+                        data: [],
+                        backgroundColor: `rgba(${colorRgb}, 0.4)`,
+                        borderColor: `rgba(${colorRgb}, 1)`,
+                        borderWidth: 2,
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    animation: { duration: 0 },
+                    scales: {
+                        y: {
+                            beginAtZero: false, // Likelihood 등 0이 아닌 값도 있으므로
+                            title: { display: true, text: label }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 3. [신규] 차트를 처음에 한 번만 초기화
+        function initializeCharts() {
+            speedChart = createChart(
+                document.getElementById('autowareSpeedChart').getContext('2d'), 
+                '차량 속도 (m/s)', '255, 99, 132'
+            );
+            likelihoodChart = createChart(
+                document.getElementById('autowareLikelihoodChart').getContext('2d'), 
+                'Likelihood', '75, 192, 192'
+            );
+            accuracyChart = createChart(
+                document.getElementById('autowareAccuracyChart').getContext('2d'), 
+                'Accuracy (m)', '153, 102, 255'
+            );
+            steeringChart = createChart(
+                document.getElementById('autowareSteeringChart').getContext('2d'), 
+                'Steering (Angle)', '255, 159, 64'
+            );
+        }
+        
+        // 4. [수정] 실시간 데이터를 받아와서 4개 차트에 모두 추가하는 함수
         function fetchAndDrawGraph() {
-           
-            fetch(FLASK_API_BASE_URL + '/api/status')
+            
+            // API 경로가 /api/status 였는지 /api/autoware 였는지 확인하세요.
+            // (이전 Python 스크립트 기준 'status_web.py' -> '/api/status')
+            // (만약 Python에서 /api/autoware로 바꾸셨다면 이대로 두셔도 됩니다)
+            fetch(FLASK_API_BASE_URL + '/api/autoware') // <-- Python API 경로 확인
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`HTTP 오류! 서버 상태: ${response.status}`);
@@ -113,142 +145,48 @@
                     return response.json();
                 })
                 .then(data => {
-                    // [수정] app.py에서 오는 모든 데이터 로드
-                    const labels = data.labels;
-                    const speedValues = data.speed;
-                    // [제거] const xValues = data.x;
-                    // [제거] const yValues = data.y;
-                    const likelihoodValues = data.likelihood; // [추가]
-                    const accuracyValues = data.accuracy;     // [추가]
-                    const steeringValues = data.steering;     // [추가]
-
-                    // --- 1. 속도 차트 업데이트 ---
-                    const speedCtx = document.getElementById('autowareSpeedChart').getContext('2d');
-                   
-                    if (speedChart) {
-                        speedChart.data.labels = labels;
-                        speedChart.data.datasets[0].data = speedValues;
-                        speedChart.update();
-                    } else {
-                        speedChart = new Chart(speedCtx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: '차량 속도 (m/s)',
-                                    data: speedValues,
-                                    backgroundColor: 'rgba(255, 99, 132, 0.4)',
-                                    borderColor: 'rgba(255, 99, 132, 1)',
-                                    borderWidth: 2,
-                                    tension: 0.1,
-                                    fill: true
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                animation: { duration: 0 },
-                                scales: {
-                                    y: {
-                                        beginAtZero: true,
-                                        title: { display: true, text: '속도 (m/s)' }
-                                    }
-                                }
-                            }
-                        });
-                    }
-
-                    // --- 2. [제거] X/Y 경로 차트 ---
-                   
-                    // --- 3. [추가] Likelihood 차트 ---
-                    const likelihoodCtx = document.getElementById('autowareLikelihoodChart').getContext('2d');
-                    if (likelihoodChart) {
-                        likelihoodChart.data.labels = labels;
-                        likelihoodChart.data.datasets[0].data = likelihoodValues;
-                        likelihoodChart.update();
-                    } else {
-                        likelihoodChart = new Chart(likelihoodCtx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: 'Likelihood',
-                                    data: likelihoodValues,
-                                    backgroundColor: 'rgba(75, 192, 192, 0.4)',
-                                    borderColor: 'rgba(75, 192, 192, 1)',
-                                    borderWidth: 2, tension: 0.1, fill: true
-                                }]
-                            },
-                            options: { responsive: true, animation: { duration: 0 }, scales: { y: { beginAtZero: false, title: { display: true, text: 'Score' } } } }
-                        });
-                    }
-
-                    // --- 4. [추가] Accuracy 차트 ---
-                    const accuracyCtx = document.getElementById('autowareAccuracyChart').getContext('2d');
-                    if (accuracyChart) {
-                        accuracyChart.data.labels = labels;
-                        accuracyChart.data.datasets[0].data = accuracyValues;
-                        accuracyChart.update();
-                    } else {
-                        accuracyChart = new Chart(accuracyCtx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: 'Accuracy',
-                                    data: accuracyValues,
-                                    backgroundColor: 'rgba(153, 102, 255, 0.4)',
-                                    borderColor: 'rgba(153, 102, 255, 1)',
-                                    borderWidth: 2, tension: 0.1, fill: true
-                                }]
-                            },
-                            options: { responsive: true, animation: { duration: 0 }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Error (m)' } } } }
-                        });
-                    }
-                   
-                    // --- 5. [추가] Steering 차트 ---
-                    const steeringCtx = document.getElementById('autowareSteeringChart').getContext('2d');
-                    if (steeringChart) {
-                        steeringChart.data.labels = labels;
-                        steeringChart.data.datasets[0].data = steeringValues;
-                        steeringChart.update();
-                    } else {
-                        steeringChart = new Chart(steeringCtx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: 'Steering',
-                                    data: steeringValues,
-                                    backgroundColor: 'rgba(255, 159, 64, 0.4)',
-                                    borderColor: 'rgba(255, 159, 64, 1)',
-                                    borderWidth: 2, tension: 0.1, fill: true
-                                }]
-                            },
-                            options: { responsive: true, animation: { duration: 0 }, scales: { y: { beginAtZero: false, title: { display: true, text: 'Angle' } } } }
-                        });
-                    }
-                   
+                    // Python API가 반환하는 '단일' 데이터를 가져옵니다.
+                    const newLabel = new Date(data.time).toLocaleTimeString('ko-KR');
+                    
+                    // 4개 차트에 각각 데이터 추가
+                    updateChartData(speedChart, newLabel, data.speed_mps);
+                    updateChartData(likelihoodChart, newLabel, data.likelihood);
+                    updateChartData(accuracyChart, newLabel, data.accuracy);
+                    updateChartData(steeringChart, newLabel, data.steering);
+                    
                     // 마지막 업데이트 시간 표시
                     document.getElementById('lastUpdateTime').textContent = '마지막 업데이트: ' + new Date().toLocaleTimeString('ko-KR');
-
                 })
                 .catch(error => {
                     console.error('데이터 로드 오류:', error);
-                    document.getElementById('lastUpdateTime').innerHTML = `<span style="color:red;">데이터 로드 실패: ${error.message} (서버 주소 및 방화벽 확인)</span>`;
+                    document.getElementById('lastUpdateTime').innerHTML = 
+                        `<span style="color:red;">데이터 로드 실패: ${error.message} (CORS 오류 또는 서버 점검)</span>`;
                 });
         }
+        
+        // 5. [신규] 차트 데이터를 갱신하는 헬퍼 함수
+        function updateChartData(chart, label, value) {
+            if (!chart) return;
+            
+            chart.data.labels.push(label);
+            chart.data.datasets[0].data.push(value);
 
-        // 페이지 로드 시 즉시 실행
+            if (chart.data.labels.length > MAX_DATA_POINTS) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update();
+        }
+
+
+        // 6. 페이지 로드 시 차트 초기화
+        initializeCharts();
+        
+        // 7. 즉시 1회 실행
         fetchAndDrawGraph();
 
-        // 2초(2000ms)마다 자동으로 데이터를 갱신
-        setInterval(fetchAndDrawGraph, 2000);
-
-       
-        // =============================================
-        // === 2. [제거] 가상 키보드 스크립트 ===
-        // =============================================
-       
+        // 8. 2초(2000ms)마다 자동으로 데이터를 갱신
+        setInterval(fetchAndDrawGraph, 2000); 
 
     </script>
 </body>
