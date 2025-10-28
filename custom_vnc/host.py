@@ -1,0 +1,283 @@
+import asyncio
+import json
+import logging
+import time
+import platform
+import os
+import threading  # <-- 1. 잠금장치 임포트
+
+import websockets
+import mss
+import pyautogui
+import numpy as np
+from av import VideoFrame
+from PIL import Image, ImageDraw
+
+from aiortc import (
+    RTCPeerConnection,
+    RTCSessionDescription,
+    VideoStreamTrack,
+    RTCConfiguration, 
+    RTCIceServer,
+)
+from aiortc.contrib.media import MediaRelay
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("host")
+
+ICE_SERVERS = [
+    {'urls': 'stun:stun.l.google.com:19302'},
+    {'urls': 'stun:stun1.l.google.com:19302'},
+    {
+        'urls': 'turn:ros.fml2.shop:3478', # (또는 fml2.shop)
+        'username': 'turn_user',
+        'credential': 'turn_password123'
+    }
+]
+
+# ▼▼▼ 2. 모든 pyautogui 호출을 보호할 잠금장치 생성 ▼▼▼
+pyautogui_lock = threading.Lock()
+# ▲▲▲ 2. 모든 pyautogui 호출을 보호할 잠금장치 생성 ▲▲▲
+
+
+# --- 1. "카메라" (화면 캡처) ---
+relay = MediaRelay()
+
+try:
+    with mss.mss() as sct_check:
+        monitor_info = sct_check.monitors[0] # 0번 모니터 (전체)
+except mss.exception.ScreenShotError as e:
+    logger.error(f"mss 초기화 실패: {e}")
+    monitor_info = {'left': 0, 'top': 0, 'width': 1920, 'height': 1080}
+
+logger.info(f"캡처할 모니터 정보: {monitor_info}")
+
+def grab_screen_and_mouse(monitor):
+    """
+    별도 스레드에서 mss/pyautogui 호출 (잠금 사용)
+    """
+    pos = (0, 0)
+    img = None
+    
+    # ▼▼▼ 3. 잠금장치 사용 ▼▼▼
+    with pyautogui_lock:
+        try:
+            # pyautogui.position() 호출
+            pos = pyautogui.position() 
+        except Exception as e:
+            # (DISPLAY 문제 등으로 실패 시 경고만)
+            logger.warning(f"pyautogui.position() 실패: {e}")
+            pos = (0, 0) 
+
+        with mss.mss() as sct:
+            img = sct.grab(monitor)
+    # ▲▲▲ 3. 잠금장치 사용 ▲▲▲
+    
+    return img, pos
+
+
+class ScreenCaptureTrack(VideoStreamTrack):
+    """
+    마우스 커서 그리기 포함
+    """
+    def __init__(self):
+        super().__init__()
+        self.counter = 0
+        self.start_time = time.time()
+        self.loop = asyncio.get_event_loop()
+        self.monitor = monitor_info
+
+    async def recv(self):
+        pts, time_base = await self.next_timestamp()
+
+        try:
+            # 헬퍼 함수 호출 (이 함수는 내부적으로 lock을 사용)
+            img_bgra, mouse_pos = await self.loop.run_in_executor(
+                None, grab_screen_and_mouse, self.monitor
+            )
+            
+            pil_img = Image.frombytes("RGBA", img_bgra.size, img_bgra.bgra, "raw", "BGRA")
+            
+            x = mouse_pos[0] - self.monitor['left']
+            y = mouse_pos[1] - self.monitor['top']
+
+            if 0 <= x < self.monitor['width'] and 0 <= y < self.monitor['height']:
+                draw = ImageDraw.Draw(pil_img)
+                draw.line((x - 10, y, x + 10, y), fill='black', width=4)
+                draw.line((x, y - 10, x, y + 10), fill='black', width=4)
+                draw.line((x - 10, y, x + 10, y), fill='white', width=2)
+                draw.line((x, y - 10, x, y + 10), fill='white', width=2)
+            
+            img_bgra_np = np.array(pil_img)
+
+        except mss.exception.ScreenShotError as e:
+            logger.error(f"화면 캡처 실패: {e}")
+            img_bgra_data = bytes(self.monitor['width'] * self.monitor['height'] * 4)
+            img_bgra_np = np.frombuffer(img_bgra_data, dtype=np.uint8).reshape((self.monitor['height'], self.monitor['width'], 4))
+        
+        img_bgr = img_bgra_np[:, :, [2, 1, 0]]
+        
+        frame = VideoFrame.from_ndarray(img_bgr, format="bgr24")
+        frame.pts = pts
+        frame.time_base = time_base
+        
+        self.counter += 1
+        elapsed = time.time() - self.start_time
+        if elapsed > 1.0:
+            fps = self.counter / elapsed
+            logger.info(f"Screen Capture FPS: {fps:.1f}")
+            self.counter = 0
+            self.start_time = time.time()
+            
+        return frame
+
+# --- 2. "로봇" (입력 제어) ---
+def handle_control_message(message_str):
+    """
+    이 함수는 이제 run_in_executor에 의해 별도 스레드에서 호출됩니다.
+    """
+    # ▼▼▼ 4. 제어 작업도 잠금장치 사용 ▼▼▼
+    with pyautogui_lock:
+        try:
+            message_json = json.loads(message_str)
+            msg_type = message_json.get("type")
+
+            if msg_type == "mousemove":
+                x = message_json.get("x")
+                y = message_json.get("y")
+                if x is not None and y is not None:
+                    pyautogui.moveTo(int(x), int(y)) 
+                
+            elif msg_type == "mousedown":
+                pyautogui.mouseDown(button=message_json.get("button", "left"))
+                
+            elif msg_type == "mouseup":
+                pyautogui.mouseUp(button=message_json.get("button", "left"))
+                
+            elif msg_type == "keydown":
+                key = message_json.get("key")
+                if key is not None: 
+                    if len(key) > 1 and key not in ['ctrl', 'alt', 'shift', 'cmd', 'enter', 'esc']:
+                         key = key.lower() 
+                    pyautogui.keyDown(key)
+                
+            elif msg_type == "keyup":
+                key = message_json.get("key")
+                if key is not None: 
+                    if len(key) > 1 and key not in ['ctrl', 'alt', 'shift', 'cmd', 'enter', 'esc']:
+                         key = key.lower()
+                    pyautogui.keyUp(key)
+
+            elif msg_type == "wheel":
+                deltaY = message_json.get("deltaY")
+                if deltaY is not None:
+                    scroll_amount = int(deltaY / 10)
+                    pyautogui.scroll(scroll_amount)
+                
+        except Exception as e:
+            logger.error(f"제어 메시지 처리 중 오류: {e}", exc_info=True)
+    # ▲▲▲ 4. 제어 작업도 잠금장치 사용 ▲▲▲
+
+# --- 3. "전화기" (WebRTC + 시그널링) ---
+
+# ▼▼▼ 5. loop와 pc를 전역 스코프로 이동 ▼▼▼
+ice_servers = [RTCIceServer(**server) for server in ICE_SERVERS]
+
+# 2. RTCConfiguration 객체 생성
+config = RTCConfiguration(iceServers=ice_servers)
+
+# 3. 설정 객체를 전달하여 pc 생성
+pc = RTCPeerConnection(configuration=config)
+loop = asyncio.get_event_loop()
+# ▲▲▲ 5. [수정] RTCConfiguration 객체를 사용하여 pc 초기화 ▲▲▲
+# ▲▲▲ 5. loop와 pc를 전역 스코프로 이동 ▲▲▲
+
+@pc.on("datachannel")
+def on_datachannel(channel):
+    logger.info(f"데이터 채널 수신: {channel.label}")
+    
+    @channel.on("message")
+    def on_message(message):
+        # ▼▼▼ 6. 제어 함수를 별도 스레드로 보내기 (메인 스레드 block 방지) ▼▼▼
+        loop.run_in_executor(None, handle_control_message, message)
+        # ▲▲▲ 6. 제어 함수를 별도 스레드로 보내기 (메인 스레드 block 방지) ▲▲▲
+
+@pc.on("iceconnectionstatechange")
+async def on_iceconnectionstatechange():
+    logger.info(f"ICE 연결 상태 변경: {pc.iceConnectionState}")
+    if pc.iceConnectionState == "failed":
+        await pc.close()
+
+async def run_host():
+    logger.info("호스트 프로그램 시작")
+    
+    video_track = ScreenCaptureTrack()
+    pc.addTrack(relay.subscribe(video_track))
+    
+    # ▼▼▼ [수정] Nginx 리버스 프록시 주소로 변경 ▼▼▼
+    signaling_server_url = "wss://ros.fml2.shop/rdp-ws/"
+    
+    try:
+        # 'ssl=True' 등의 옵션은 websockets 라이브러리가 wss://를 보고 자동 처리
+        async with websockets.connect(signaling_server_url) as ws:
+            logger.info("시그널링 서버에 접속 완료")
+            
+            async for message_str in ws:
+                message = json.loads(message_str)
+                
+                if "offer" in message:
+                    offer_sdp = RTCSessionDescription(sdp=message["offer"]["sdp"], type=message["offer"]["type"])
+                    logger.info("클라이언트로부터 Offer 수신")
+                    
+                    await pc.setRemoteDescription(offer_sdp)
+                    answer_sdp = await pc.createAnswer()
+                    await pc.setLocalDescription(answer_sdp)
+                    
+                    await ws.send(json.dumps({
+                        "answer": {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+                    }))
+                    logger.info("Answer 생성 및 전송 완료")
+                    
+                elif "candidate" in message:
+                    if message["candidate"]:
+                        candidate_data = message["candidate"]
+                        
+                        candidate_string = candidate_data.get("candidate", "")
+                        if candidate_string and ":" in candidate_string:
+                            from aiortc.sdp import candidate_from_sdp
+                            
+                            ice_candidate = candidate_from_sdp(candidate_string.split(":", 1)[1])
+                            ice_candidate.sdpMid = candidate_data["sdpMid"]
+                            ice_candidate.sdpMLineIndex = candidate_data["sdpMLineIndex"]
+                            
+                            await pc.addIceCandidate(ice_candidate)
+                            logger.info("ICE Candidate 추가 완료")
+                        else:
+                            logger.info("비어있는 ICE Candidate 수신 (무시함)")
+                    
+    except ConnectionRefusedError:
+        logger.error(f"시그널링 서버({signaling_server_url})에 연결할 수 없습니다. 1단계 C++ 서버가 실행 중인지, IP 주소가 올바른지 확인하세요.")
+    except Exception as e:
+        logger.error(f"시그널링 중 오류: {e}", exc_info=True)
+    finally:
+        logger.info("호스트 프로그램 정리 중...")
+        await pc.close()
+
+if __name__ == "__main__":
+    if platform.system() == "Linux":
+        # ▼▼▼ 7. X11 스레드 초기화 (중요) ▼▼▼
+        # pyautogui가 Xlib 스레드 지원을 활성화하도록 합니다.
+        import Xlib.threaded
+        # ▲▲▲ 7. X11 스레드 초기화 (중요) ▲▲▲
+        logger.info(f"Linux($DISPLAY={os.getenv('DISPLAY')}) 환경에서 실행합니다.")
+        pyautogui.FAILSAFE = False
+        pyautogui.PAUSE = 0
+    
+    # (loop는 이미 전역으로 이동)
+    try:
+        loop.run_until_complete(run_host())
+    except KeyboardInterrupt:
+        logger.info("사용자에 의해 중지됨")
+    finally:
+        loop.run_until_complete(pc.close())
+        logger.info("호스트 프로그램 종료")

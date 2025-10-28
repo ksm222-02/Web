@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC 원격 데스크톱</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* 스크롤바 숨기기 */
+            background-color: #000;
+        }
+        #remote-screen {
+            width: 100vw; /* 화면 너비 100% */
+            height: 100vh; /* 화면 높이 100% */
+            object-fit: contain; /* 비율 유지하며 꽉 채우기 */
+            cursor: none; /* 내 마우스 커서는 숨기기 (원격지 커서만 보임) */
+        }
+        #status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px;
+            border-radius: 5px;
+            font-family: sans-serif;
+            display: none; /* 기본 숨김 */
+        }
+    </style>
+</head>
+<body>
+    <div id="status">연결 중...</div>
+    <video id="remote-screen" autoplay playsinline></video>
+
+    <script>
+        const statusElement = document.getElementById("status");
+        const videoElement = document.getElementById("remote-screen");
+
+        // --- 1. 설정 ---
+        // 1단계에서 실행한 C++ 시그널링 서버의 IP 주소로 변경하세요.
+        // (만약 host.py와 index.html을 같은 PC에서 테스트하면 'ws://127.0.0.1:8765' 사용)
+// --- 1. 설정 ---
+        // Nginx 리버스 프록시를 통해 접속할 공개 도메인 주소로 변경
+        const SIGNALING_SERVER_URL = "wss://ros.fml2.shop/rdp-ws/"; 
+
+// ▼▼▼ [수정] 도메인을 ros.fml2.shop으로 변경 ▼▼▼
+    const ICE_SERVERS = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        {
+            urls: 'turn:ros.fml2.shop:3478', // (또는 fml2.shop - VM이 동일하므로)
+            username: 'turn_user',         // (Coturn 설정과 일치)
+            credential: 'turn_password123' // (Coturn 설정과 일치)
+    }
+];
+
+        // --- 2. WebRTC "전화기" 및 "문자 채널" 생성 ---
+        let pc; // PeerConnection
+        let dc; // DataChannel
+
+        function createPeerConnection() {
+            statusElement.style.display = "block";
+            statusElement.innerText = "연결 중...";
+
+            pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+            // "문자(제어)" 채널 생성 (이름은 host.py와 같아야 함)
+            dc = pc.createDataChannel("controls", { ordered: true }); // 순서 보장
+            dc.onopen = () => {
+                statusElement.innerText = "✅ 연결됨 (컨트롤 채널 열림)";
+                setTimeout(() => { statusElement.style.display = "none"; }, 2000);
+            };
+            dc.onclose = () => {
+                statusElement.innerText = "❌ 연결 끊김 (컨트롤 채널 닫힘)";
+                statusElement.style.display = "block";
+            };
+            dc.onerror = (e) => console.error("데이터 채널 오류:", e);
+
+            // 호스트로부터 "영상"이 도착했을 때 처리
+            pc.ontrack = (event) => {
+                console.log("비디오 트랙 수신!");
+                if (event.streams && event.streams[0]) {
+                    videoElement.srcObject = event.streams[0];
+                }
+            };
+
+            // ICE 연결 상태 변경 시
+            pc.oniceconnectionstatechange = () => {
+                console.log("ICE 상태:", pc.iceConnectionState);
+                if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+                    statusElement.innerText = "❌ 연결 실패 또는 끊김";
+                    statusElement.style.display = "block";
+                } else if (pc.iceConnectionState === "connected") {
+                    statusElement.innerText = "⚡ P2P 연결 성공!";
+                }
+            };
+
+            return pc;
+        }
+
+        // --- 3. 시그널링 서버 접속 및 통신 ---
+        async function connect() {
+            pc = createPeerConnection();
+            
+            const ws = new WebSocket(SIGNALING_SERVER_URL);
+
+            ws.onopen = async () => {
+                console.log("시그널링 서버 접속 성공");
+
+                // P2P 연결 후보(주소)를 찾으면 시그널링 서버로 전송
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        console.log("ICE Candidate 전송:", event.candidate.candidate);
+                        ws.send(JSON.stringify({ 
+                            candidate: {
+                                candidate: event.candidate.candidate,
+                                sdpMid: event.candidate.sdpMid,
+                                sdpMLineIndex: event.candidate.sdpMLineIndex
+                            }
+                        }));
+                    }
+                };
+                
+                // "통화 신청(Offer)" 생성 및 전송
+                try {
+                    // 비디오/오디오를 수신하겠다고 명시
+                    pc.addTransceiver('video', {'direction': 'recvonly'});
+                    
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    
+                    console.log("Offer 생성 및 전송");
+                    ws.send(JSON.stringify({ 
+                        offer: { sdp: offer.sdp, type: offer.type } 
+                    }));
+                } catch (e) {
+                    console.error("Offer 생성 실패:", e);
+                }
+            };
+
+            ws.onmessage = async (event) => {
+                const message = JSON.parse(event.data);
+
+                if (message.answer) {
+                    // 호스트가 보낸 "통화 수락(Answer)"을 받음
+                    console.log("Answer 수신");
+                    try {
+                        await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                    } catch (e) {
+                        console.error("RemoteDescription 설정 실패:", e);
+                    }
+                } else if (message.candidate) {
+                    // 호스트가 보낸 P2P 연결 "후보 주소(Candidate)"를 받음
+                    console.log("ICE Candidate 수신:", message.candidate.candidate);
+                    try {
+                        const candidate = new RTCIceCandidate({
+                            candidate: message.candidate.candidate,
+                            sdpMid: message.candidate.sdpMid,
+                            sdpMLineIndex: message.candidate.sdpMLineIndex
+                        });
+                        await pc.addIceCandidate(candidate);
+                    } catch (e) {
+                        console.error("Candidate 추가 실패:", e);
+                    }
+                }
+            };
+
+            ws.onerror = (e) => {
+                console.error("WebSocket 오류:", e);
+                statusElement.innerText = "❌ 시그널링 서버 연결 실패";
+                statusElement.style.display = "block";
+            };
+        }
+
+        // --- 4. "조종간" (마우스/키보드 이벤트) 캡처 및 전송 ---
+        function setupInputListeners() {
+            // DataChannel이 준비되었는지 확인하는 헬퍼 함수
+            function sendControl(data) {
+                if (dc && dc.readyState === "open") {
+                    dc.send(JSON.stringify(data));
+                }
+            }
+            
+            // 좌표 변환 (브라우저 화면 좌표 -> 원격지 실제 좌표)
+            function getNormalizedCoords(e) {
+                const rect = videoElement.getBoundingClientRect();
+                const videoWidth = videoElement.videoWidth;
+                const videoHeight = videoElement.videoHeight;
+
+                // 브라우저 화면상의 비디오 크기
+                const viewWidth = rect.width;
+                const viewHeight = rect.height;
+
+                // 원본 비디오 비율과 화면상 비디오 비율 계산
+                const videoRatio = videoWidth / videoHeight;
+                const viewRatio = viewWidth / viewHeight;
+
+                let scaleX, scaleY, offsetX, offsetY;
+
+                if (videoRatio > viewRatio) { // 비디오가 좌우로 더 길쭉한 경우 (레터박스 위아래)
+                    scaleX = viewWidth / videoWidth;
+                    scaleY = scaleX;
+                    offsetX = 0;
+                    offsetY = (viewHeight - (videoHeight * scaleY)) / 2;
+                } else { // 비디오가 위아래로 더 길쭉한 경우 (레터박스 좌우)
+                    scaleY = viewHeight / videoHeight;
+                    scaleX = scaleY;
+                    offsetY = 0;
+                    offsetX = (viewWidth - (videoWidth * scaleX)) / 2;
+                }
+
+                // 이벤트 좌표(e.clientX, e.clientY)에서 레터박스 오프셋을 빼고 스케일로 나눔
+                let x = (e.clientX - rect.left - offsetX) / scaleX;
+                let y = (e.clientY - rect.top - offsetY) / scaleY;
+
+                // 비디오 영역 밖 클릭 방지
+                x = Math.max(0, Math.min(videoWidth, x));
+                y = Math.max(0, Math.min(videoHeight, y));
+
+                return { x, y };
+            }
+
+            // 마우스 움직임 (Throttling - 0.016초(약 60fps)마다 한 번씩만 전송)
+            let lastMoveTime = 0;
+            videoElement.addEventListener("mousemove", (e) => {
+                const now = performance.now();
+                if (now - lastMoveTime < 16) return; // 16ms (약 60fps)
+                lastMoveTime = now;
+                
+                const coords = getNormalizedCoords(e);
+                sendControl({ type: "mousemove", x: coords.x, y: coords.y });
+            });
+
+            // 마우스 버튼
+            videoElement.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                const button = e.button === 0 ? "left" : e.button === 1 ? "middle" : "right";
+                sendControl({ type: "mousedown", button: button });
+            });
+            videoElement.addEventListener("mouseup", (e) => {
+                e.preventDefault();
+                const button = e.button === 0 ? "left" : e.button === 1 ? "middle" : "right";
+                sendControl({ type: "mouseup", button: button });
+            });
+
+            // 우클릭 메뉴 방지
+            videoElement.addEventListener("contextmenu", (e) => e.preventDefault());
+
+            // 마우스 휠
+            videoElement.addEventListener("wheel", (e) => {
+                e.preventDefault();
+                // deltaY (양수: 아래로, 음수: 위로) - host.py의 pyautogui.scroll() 방향과 맞음
+                sendControl({ type: "wheel", deltaY: e.deltaY });
+            });
+
+            // 키보드 이벤트 (window 전체에 연결)
+            window.addEventListener("keydown", (e) => {
+                // F5, F12 등 브라우저 기능키 방지
+                if (!e.metaKey && !e.ctrlKey) {
+                    e.preventDefault();
+                }
+                sendControl({ type: "keydown", key: e.key });
+            });
+            window.addEventListener("keyup", (e) => {
+                e.preventDefault();
+                sendControl({ type: "keyup", key: e.key });
+            });
+        }
+
+        // --- 5. 시작 ---
+        connect();
+        setupInputListeners();
+
+    </script>
+</body>
+</html>
