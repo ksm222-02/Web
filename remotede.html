@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC 원격 데스크톱</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #remote-screen {
+            width: 100vw;
+            height: 100vh; 
+            object-fit: contain; 
+            cursor: none; 
+        }
+        #status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px;
+            border-radius: 5px;
+            font-family: sans-serif;
+            display: none; /* 기본 숨김 */
+        }
+    </style>
+</head>
+<body>
+    <div id="status">연결 중...</div>
+    <video id="remote-screen" autoplay playsinline></video>
+
+    <script>
+        const statusElement = document.getElementById("status");
+        const videoElement = document.getElementById("remote-screen");
+
+        const SIGNALING_SERVER_URL = "wss://ros.fml1.store/rdp-ws/"; 
+    const ICE_SERVERS = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        {
+            urls: 'turn:ros.fml1.store:3478',
+            username: 'turn_user',        
+            credential: 'turn_password123' 
+    }
+];
+
+        let pc; 
+        let dc; 
+
+        function createPeerConnection() {
+            statusElement.style.display = "block";
+            statusElement.innerText = "연결 중...";
+
+            pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+            dc = pc.createDataChannel("controls", { ordered: true }); 
+            dc.onopen = () => {
+                statusElement.innerText = "✅ 연결됨 (컨트롤 채널 열림)";
+                setTimeout(() => { statusElement.style.display = "none"; }, 2000);
+            };
+            dc.onclose = () => {
+                statusElement.innerText = "❌ 연결 끊김 (컨트롤 채널 닫힘)";
+                statusElement.style.display = "block";
+            };
+            dc.onerror = (e) => console.error("데이터 채널 오류:", e);
+
+            pc.ontrack = (event) => {
+                console.log("비디오 트랙 수신!");
+                if (event.streams && event.streams[0]) {
+                    videoElement.srcObject = event.streams[0];
+                }
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                console.log("ICE 상태:", pc.iceConnectionState);
+                if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+                    statusElement.innerText = "❌ 연결 실패 또는 끊김";
+                    statusElement.style.display = "block";
+                } else if (pc.iceConnectionState === "connected") {
+                    statusElement.innerText = "⚡ P2P 연결 성공!";
+                }
+            };
+
+            return pc;
+        }
+
+        async function connect() {
+            pc = createPeerConnection();
+            
+            const ws = new WebSocket(SIGNALING_SERVER_URL);
+
+            ws.onopen = async () => {
+                console.log("시그널링 서버 접속 성공");
+
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        console.log("ICE Candidate 전송:", event.candidate.candidate);
+                        ws.send(JSON.stringify({ 
+                            candidate: {
+                                candidate: event.candidate.candidate,
+                                sdpMid: event.candidate.sdpMid,
+                                sdpMLineIndex: event.candidate.sdpMLineIndex
+                            }
+                        }));
+                    }
+                };
+                
+                try {
+                    pc.addTransceiver('video', {'direction': 'recvonly'});
+                    
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    
+                    console.log("Offer 생성 및 전송");
+                    ws.send(JSON.stringify({ 
+                        offer: { sdp: offer.sdp, type: offer.type } 
+                    }));
+                } catch (e) {
+                    console.error("Offer 생성 실패:", e);
+                }
+            };
+
+            ws.onmessage = async (event) => {
+                const message = JSON.parse(event.data);
+
+                if (message.answer) {
+                    console.log("Answer 수신");
+                    try {
+                        await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                    } catch (e) {
+                        console.error("RemoteDescription 설정 실패:", e);
+                    }
+                } else if (message.candidate) {
+                    console.log("ICE Candidate 수신:", message.candidate.candidate);
+                    try {
+                        const candidate = new RTCIceCandidate({
+                            candidate: message.candidate.candidate,
+                            sdpMid: message.candidate.sdpMid,
+                            sdpMLineIndex: message.candidate.sdpMLineIndex
+                        });
+                        await pc.addIceCandidate(candidate);
+                    } catch (e) {
+                        console.error("Candidate 추가 실패:", e);
+                    }
+                }
+            };
+
+            ws.onerror = (e) => {
+                console.error("WebSocket 오류:", e);
+                statusElement.innerText = "❌ 시그널링 서버 연결 실패";
+                statusElement.style.display = "block";
+            };
+        }
+
+        function setupInputListeners() {
+            function sendControl(data) {
+                if (dc && dc.readyState === "open") {
+                    dc.send(JSON.stringify(data));
+                }
+            }
+            
+            function getNormalizedCoords(e) {
+                const rect = videoElement.getBoundingClientRect();
+                const videoWidth = videoElement.videoWidth;
+                const videoHeight = videoElement.videoHeight;
+
+                const viewWidth = rect.width;
+                const viewHeight = rect.height;
+
+                const videoRatio = videoWidth / videoHeight;
+                const viewRatio = viewWidth / viewHeight;
+
+                let scaleX, scaleY, offsetX, offsetY;
+
+                if (videoRatio > viewRatio) {
+                    scaleX = viewWidth / videoWidth;
+                    scaleY = scaleX;
+                    offsetX = 0;
+                    offsetY = (viewHeight - (videoHeight * scaleY)) / 2;
+                } else { 
+                    scaleY = viewHeight / videoHeight;
+                    scaleX = scaleY;
+                    offsetY = 0;
+                    offsetX = (viewWidth - (videoWidth * scaleX)) / 2;
+                }
+
+                let x = (e.clientX - rect.left - offsetX) / scaleX;
+                let y = (e.clientY - rect.top - offsetY) / scaleY;
+
+                x = Math.max(0, Math.min(videoWidth, x));
+                y = Math.max(0, Math.min(videoHeight, y));
+
+                return { x, y };
+            }
+
+            let lastMoveTime = 0;
+            videoElement.addEventListener("mousemove", (e) => {
+                const now = performance.now();
+                if (now - lastMoveTime < 16) return;
+                lastMoveTime = now;
+                
+                const coords = getNormalizedCoords(e);
+                sendControl({ type: "mousemove", x: coords.x, y: coords.y });
+            });
+
+            videoElement.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                const button = e.button === 0 ? "left" : e.button === 1 ? "middle" : "right";
+                sendControl({ type: "mousedown", button: button });
+            });
+            videoElement.addEventListener("mouseup", (e) => {
+                e.preventDefault();
+                const button = e.button === 0 ? "left" : e.button === 1 ? "middle" : "right";
+                sendControl({ type: "mouseup", button: button });
+            });
+
+            videoElement.addEventListener("contextmenu", (e) => e.preventDefault());
+
+            videoElement.addEventListener("wheel", (e) => {
+                e.preventDefault();
+                sendControl({ type: "wheel", deltaY: e.deltaY });
+            });
+
+            window.addEventListener("keydown", (e) => {
+                if (!e.metaKey && !e.ctrlKey) {
+                    e.preventDefault();
+                }
+                sendControl({ type: "keydown", key: e.key });
+            });
+            window.addEventListener("keyup", (e) => {
+                e.preventDefault();
+                sendControl({ type: "keyup", key: e.key });
+            });
+        }
+
+        connect();
+        setupInputListeners();
+
+    </script>
+</body>
+</html>
